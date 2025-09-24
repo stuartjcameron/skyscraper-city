@@ -8,7 +8,8 @@ vec = pygame.math.Vector2  # 2 for two dimensional
  
 HEIGHT = 700
 WIDTH = 1000
-ACC = 0.5
+GRAVITY = .5
+ACC = .5
 FRIC = -0.12
 FPS = 60
 TOWER_WIDTH = 10   # number of bricks wide each tower is
@@ -87,6 +88,9 @@ class Brick(pygame.sprite.Sprite):
                     self.moving = False
         self.rect.midbottom = self.pos
 
+    def __repr__(self):
+        return f"Brick {self.tower} {self.position} {self.rect.top}"
+
 class Player(pygame.sprite.Sprite):
     """
     TODO:
@@ -105,11 +109,12 @@ class Player(pygame.sprite.Sprite):
         self.pos = vec(self.rect.midbottom)
         self.vel = vec(0,0)
         self.acc = vec(0,0)
-        self.on = None      # If they are on a brick this will be updated to (brick, diagonal)
+        self.on = ground      # If they are on a brick this will be updated to (brick, diagonal)
+                            # If they are falling this is updated to None
 
     def move(self):
         self.acc = vec(0,0)
-        _, start_position = x_to_position(self.pos)
+        #_, start_position = x_to_position(self.pos.x)   # not used because we always check for bricks coming up
         pressed_keys = pygame.key.get_pressed()
         if pressed_keys[K_UP]:
             self.gun_angle += GUN_SPEED
@@ -125,6 +130,15 @@ class Player(pygame.sprite.Sprite):
         if pressed_keys[K_RIGHT]:
             self.acc.x = ACC
             self.direction = RIGHT
+        
+        # Check vertical movement
+        if self.on is None:   # falling
+            self.acc.y = GRAVITY 
+        else:  # on brick or ground
+            self.vel.y = 0
+            self.pos.y = self.on.rect.top
+        
+        # Resolve movement
         self.acc.x += self.vel.x * FRIC
         self.vel += self.acc
         self.pos += self.vel + 0.5 * self.acc
@@ -133,17 +147,40 @@ class Player(pygame.sprite.Sprite):
         if self.pos.x < PLAYER_SIZE / 2:
             self.pos.x = PLAYER_SIZE / 2
         self.rect.midbottom = self.pos
-        _, new_position = x_to_position(self.pos)
-        if not start_position == new_position:
-            self.check_what_on(new_position)
+
+        # Check new position
+        _, position = x_to_position(self.pos.x)
+        self.on = self.check_what_on(position)
+        # Note, the above check could be optimized. Does not need to be checked in every cycle. Only when
+        # (1) we move to a new column position
+        # (2) we are falling (and then need to be more careful in collision check)
+        # (3) we are on the ground and a brick in the same position is rising
+        
         self.update()
 
     def check_what_on(self, position):
-        """ Check what the player is on """
+        """ Check what the player is on.
+             Scenarios:
+             - in the air -> fall until we hit a brick or the ground. Bricks may be coming up under the player, 
+                so we have to check this continuously while falling.
+             - on a brick (top of brick is close to bottom of player) -> move up or down if the brick moves.
+             - on a slope (slope is close to bottom of player) -> move up or down if the brick moves.
+               L/R moves up or down the slope.
+            - on the ground (ground is close to bottom of player and there is no brick coming up) -> as usual
+            """
         for brick in bricks:
-            if brick.tower == self.tower and brick.position == position:
-                pass
-    
+            if brick.tower == self.tower and brick.position == position and 2 > brick.rect.top - self.rect.bottom >= 0:
+                if self.on != brick:
+                    print("on", brick)
+                return brick
+        if 2 > ground.rect.top - self.rect.bottom >= 0:  # close to ground
+            if self.on != ground:
+                print("on ground")
+            return ground
+        if self.on is not None:
+            print("Falling")
+        return None
+           
     def update(self):
         self.surf.fill((255, 255, 255))
         pygame.draw.circle(self.surf, (30, 30, 30), (PLAYER_SIZE / 2, PLAYER_SIZE / 2), PLAYER_SIZE * .3, width=0)
@@ -168,7 +205,7 @@ P1 = Player()
 players = pygame.sprite.Group(P1)
 background = pygame.sprite.Group(ground)
 bricks = pygame.sprite.Group()
-
+bricks_by_position = {LEFT: [], RIGHT: []}
 started = True
 add_bricks_event = pygame.USEREVENT
 pygame.time.set_timer(add_bricks_event, BRICK_FREQ)
