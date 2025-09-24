@@ -24,18 +24,20 @@ BRICK_CHANCE = .2   # probability of brick appearing in each column in each roun
 GUN_TOP = .9        # Highest angle for gun (1 = straight up, .5 = horizontal)
 GUN_BOTTOM = .5     # Lowest angle for gun
 GUN_SPEED = .04     # Speed at which gun rotates
- 
+FLOOR_COLLISION_THRESHOLD = 2 # number of pixels distance at which we assume we are on a platform
 FramePerSec = pygame.time.Clock()
  
 displaysurface = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Game")
 
 def x_to_position(x):
-    """ Convert an x coordinate to a tower, position (column) tuple """
+    """ Convert an x coordinate to a position in the tower """
     if x < WIDTH / 2:
-        return LEFT, (x - BRICK_WIDTH) // BRICK_WIDTH
+        r = (x - BRICK_WIDTH) / BRICK_WIDTH
     else:
-        return RIGHT, (x - WIDTH) // BRICK_WIDTH
+        r = (x - RIGHT_TOWER_EDGE) / BRICK_WIDTH
+    if 0 <= r < TOWER_WIDTH:
+        return int(r)
 
 def position_to_x(tower, position):
     """ Convert a tower and position to an x coordinate """
@@ -108,14 +110,14 @@ class Player(pygame.sprite.Sprite):
         self.rect = self.surf.get_rect(topleft = (0, HEIGHT - BRICK_HEIGHT - PLAYER_SIZE))
         self.pos = vec(self.rect.midbottom)
         self.vel = vec(0,0)
-        self.acc = vec(0,0)
-        self.on = ground      # If they are on a brick this will be updated to (brick, diagonal)
+        self.previous_under = ground      # If they are on a brick this will be updated to (brick, diagonal)
                             # If they are falling this is updated to None
 
     def move(self):
-        self.acc = vec(0,0)
-        #_, start_position = x_to_position(self.pos.x)   # not used because we always check for bricks coming up
+        self.acc = vec(0, 0)
         pressed_keys = pygame.key.get_pressed()
+        
+        # Adjust gun direction
         if pressed_keys[K_UP]:
             self.gun_angle += GUN_SPEED
             if self.gun_angle > GUN_TOP:
@@ -124,6 +126,8 @@ class Player(pygame.sprite.Sprite):
             self.gun_angle -= GUN_SPEED
             if self.gun_angle < GUN_BOTTOM:
                 self.gun_angle = GUN_BOTTOM
+        
+        # Check horizontal movement
         if pressed_keys[K_LEFT]:
             self.acc.x = -ACC
             self.direction = LEFT
@@ -132,11 +136,16 @@ class Player(pygame.sprite.Sprite):
             self.direction = RIGHT
         
         # Check vertical movement
-        if self.on is None:   # falling
-            self.acc.y = GRAVITY 
-        else:  # on brick or ground
+        under = self.under()
+        if not under == self.previous_under:
+            print("under", under)
+        self.previous_under = under
+        if under.rect.top - self.pos.y <= FLOOR_COLLISION_THRESHOLD:  # on the brick / ground
+            self.acc.y = 0
             self.vel.y = 0
-            self.pos.y = self.on.rect.top
+            self.pos.y = under.rect.top
+        else:  # falling
+            self.acc.y = GRAVITY
         
         # Resolve movement
         self.acc.x += self.vel.x * FRIC
@@ -146,40 +155,20 @@ class Player(pygame.sprite.Sprite):
             self.pos.x = WIDTH / 2 - PLAYER_SIZE / 2
         if self.pos.x < PLAYER_SIZE / 2:
             self.pos.x = PLAYER_SIZE / 2
-        self.rect.midbottom = self.pos
-
-        # Check new position
-        _, position = x_to_position(self.pos.x)
-        self.on = self.check_what_on(position)
-        # Note, the above check could be optimized. Does not need to be checked in every cycle. Only when
-        # (1) we move to a new column position
-        # (2) we are falling (and then need to be more careful in collision check)
-        # (3) we are on the ground and a brick in the same position is rising
-        
+        if self.vel.y > 0 and self.pos.y > under.rect.top:   # Check if we've fallen too far
+            self.pos.y = under.rect.top
+        self.rect.midbottom = self.pos        
         self.update()
 
-    def check_what_on(self, position):
-        """ Check what the player is on.
-             Scenarios:
-             - in the air -> fall until we hit a brick or the ground. Bricks may be coming up under the player, 
-                so we have to check this continuously while falling.
-             - on a brick (top of brick is close to bottom of player) -> move up or down if the brick moves.
-             - on a slope (slope is close to bottom of player) -> move up or down if the brick moves.
-               L/R moves up or down the slope.
-            - on the ground (ground is close to bottom of player and there is no brick coming up) -> as usual
-            """
-        for brick in bricks:
-            if brick.tower == self.tower and brick.position == position and 2 > brick.rect.top - self.rect.bottom >= 0:
-                if self.on != brick:
-                    print("on", brick)
-                return brick
-        if 2 > ground.rect.top - self.rect.bottom >= 0:  # close to ground
-            if self.on != ground:
-                print("on ground")
-            return ground
-        if self.on is not None:
-            print("Falling")
-        return None
+    def under(self):
+        """ Check whether the player is over a brick or the ground 
+         TODO: still working  inconsistently at the moment - check it. """
+        position = x_to_position(self.pos.x)
+        if position is not None:
+            for brick in bricks_by_position[self.tower][position]:
+                if self.pos.y - FLOOR_COLLISION_THRESHOLD <= brick.rect.top:
+                    return brick  # We assume the highest are at the start of the list.        
+        return ground
            
     def update(self):
         self.surf.fill((255, 255, 255))
@@ -205,7 +194,8 @@ P1 = Player()
 players = pygame.sprite.Group(P1)
 background = pygame.sprite.Group(ground)
 bricks = pygame.sprite.Group()
-bricks_by_position = {LEFT: [], RIGHT: []}
+bricks_by_position = {LEFT: [[] for _ in range(TOWER_WIDTH)],
+                      RIGHT: [[] for _ in range(TOWER_WIDTH)]}
 started = True
 add_bricks_event = pygame.USEREVENT
 pygame.time.set_timer(add_bricks_event, BRICK_FREQ)
@@ -220,13 +210,14 @@ def add_bricks():
             #staircase = random.choice(to_add)
             #print(to_add)
             for position in to_add:
-                for brick in bricks:
-                    if brick.position == position and brick.tower == tower:
-                        brick.go_higher()
+                for brick in bricks_by_position[tower][position]:
+                    brick.go_higher()
                 if random.random() < .2:
-                    bricks.add(Brick(tower, position, True))
+                    brick = Brick(tower, position, True)
                 else:
-                    bricks.add(Brick(tower, position, False))
+                    brick = Brick(tower, position, False)
+                bricks.add(brick)
+                bricks_by_position[tower][position].append(brick)
                 #print("at", tower, position)
 
 while True:
