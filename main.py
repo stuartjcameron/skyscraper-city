@@ -9,22 +9,26 @@ vec = pygame.math.Vector2  # 2 for two dimensional
 HEIGHT = 700
 WIDTH = 1000
 GRAVITY = .5
-ACC = .5
-FRIC = -0.12
 FPS = 60
 TOWER_WIDTH = 10   # number of bricks wide each tower is
 BRICK_WIDTH = BRICK_HEIGHT = 30    # number of pixels wide each brick is
-PLAYER_SIZE = 20
 RIGHT_TOWER_EDGE = WIDTH - (TOWER_WIDTH + 1) * BRICK_WIDTH   # left edge of the right tower
-
 
 BRICK_SPEED = .5
 BRICK_FREQ = 1000
 BRICK_CHANCE = .2   # probability of brick appearing in each column in each round
+
+ACC = .5
+FRIC = -0.12
+PLAYER_SIZE = 20
 GUN_TOP = .9        # Highest angle for gun (1 = straight up, .5 = horizontal)
 GUN_BOTTOM = .2     # Lowest angle for gun
 GUN_SPEED = .04     # Speed at which gun rotates
 FLOOR_COLLISION_THRESHOLD = 2 # number of pixels distance at which we assume we are on a platform
+
+BULLET_SIZE = 5
+BULLET_SPEED_MIN = 12
+BULLET_SPEED_MAX = 15
 
 # Labels for directions
 LEFT = 0
@@ -108,26 +112,36 @@ class Player(pygame.sprite.Sprite):
         self.surf.set_colorkey((255,255,255))
         self.gun_angle = .5
         self.direction = RIGHT
-        self.update()
         self.rect = self.surf.get_rect(topleft = (0, HEIGHT - BRICK_HEIGHT - PLAYER_SIZE))
+        self.centre = vec(PLAYER_SIZE / 2, PLAYER_SIZE / 2)
         self.pos = vec(self.rect.midbottom)
         self.vel = vec(0,0)
         self.previous_under = ground
         self.previous_behind = None
-
+        self.shooting = False
+        self.update()
+        
     def move(self):
         self.acc = vec(0, 0)
         pressed_keys = pygame.key.get_pressed()
         
+        # Firing
+        if pressed_keys[K_LSHIFT]:
+            self.start_shoot()
+        elif self.shooting:  # release shift key 
+            self.finish_shoot()
+
         # Adjust gun direction
         if pressed_keys[K_UP]:
             self.gun_angle += GUN_SPEED
             if self.gun_angle > GUN_TOP:
                 self.gun_angle = GUN_TOP
+            print('gun', self.gun_end())
         if pressed_keys[K_DOWN]:
             self.gun_angle -= GUN_SPEED
             if self.gun_angle < GUN_BOTTOM:
                 self.gun_angle = GUN_BOTTOM
+            print('gun', self.gun_end())
         
         if pressed_keys[K_1]:
             add_bricks()
@@ -146,8 +160,8 @@ class Player(pygame.sprite.Sprite):
         self.previous_under = under
         under_stairs = getattr(under, "stairs", None)            
         behind = self.behind()
-        if not behind == self.previous_behind:
-            print("behind", behind) 
+        # if not behind == self.previous_behind:
+            # print("behind", behind) 
         self.previous_behind = behind
         stairs = getattr(behind, "stairs", None)
         if stairs:
@@ -202,6 +216,14 @@ class Player(pygame.sprite.Sprite):
         self.rect.midbottom = self.pos        
         self.update()
 
+    def start_shoot(self):
+        self.shooting = True
+
+    def finish_shoot(self):
+        print('shoot', self.gun_end(), self.direction_vector())
+        bullets.add(Bullet(tower=self.tower, pos=self.rect.center + self.gun_end(), direction=self.direction_vector()))
+        self.shooting = False
+
     def behind(self):
         """ Check which brick is behind the player centre """
         #if self.direction == LEFT:  # we check the left edge if facing left, right edge if facing right
@@ -224,17 +246,47 @@ class Player(pygame.sprite.Sprite):
                 if self.pos.y - FLOOR_COLLISION_THRESHOLD <= brick.rect.top:  # player is above, or just slightly below, brick top
                     return brick  # We assume the highest are at the start of the list.        
         return ground
-           
+
+    def direction_vector(self):
+        if self.direction == LEFT:
+            return vec(-math.sin(self.gun_angle * math.pi), math.cos(self.gun_angle * math.pi))
+        else:
+            return vec(math.sin(self.gun_angle * math.pi), math.cos(self.gun_angle * math.pi))
+        
+    def gun_end(self):
+        return self.centre + self.direction_vector() * PLAYER_SIZE * .4
+    
     def update(self):
         self.surf.fill((255, 255, 255))
-        pygame.draw.circle(self.surf, (30, 30, 30), (PLAYER_SIZE / 2, PLAYER_SIZE / 2), PLAYER_SIZE * .3, width=0)
-        if self.direction == LEFT:
-            direction = -1
-        else:
-            direction = 1
-        gun_end = (PLAYER_SIZE / 2 + direction * math.sin(self.gun_angle * math.pi) * .4 * PLAYER_SIZE,
-                   PLAYER_SIZE / 2 + math.cos(self.gun_angle * math.pi) * .4 * PLAYER_SIZE)
-        pygame.draw.line(self.surf, (30, 30, 100), (PLAYER_SIZE / 2, PLAYER_SIZE / 2), gun_end, width = 3)
+        pygame.draw.circle(self.surf, (30, 30, 30), self.centre, PLAYER_SIZE * .3, width=0)
+        pygame.draw.line(self.surf, (30, 30, 100), self.centre, self.gun_end(), width=3)
+
+class Bullet(pygame.sprite.Sprite):
+    """ Bullet goes straight through first brick it touches. Second brick explodes destroying all the bricks around it. """
+    def __init__(self, tower, pos, direction):
+        super().__init__()
+        self.tower = tower
+        self.pos = pos
+        self.vel = direction * BULLET_SPEED
+        self.acc = vec(0, GRAVITY)
+        self.surf = pygame.Surface((BULLET_SIZE, BULLET_SIZE))
+        self.surf.set_colorkey((255,255,255))
+        self.rect = self.surf.get_rect(center=pos)       
+
+    def move(self):
+        self.pos += self.vel + .5 * self.acc
+        self.vel += self.acc
+        self.rect.center = self.pos
+        if self.pos.y >= ground.rect.top:
+            self.pos.y = ground.rect.top
+            self.vel = (0, 0)
+        self.update()
+        
+    def update(self):
+        self.surf.fill((255, 255, 255))
+        pygame.draw.circle(self.surf, (0, 0, 0), (BULLET_SIZE / 2, BULLET_SIZE / 2), BULLET_SIZE, width=0)
+
+
 
 class Ground(pygame.sprite.Sprite):
     def __init__(self):
@@ -250,9 +302,10 @@ P1 = Player()
 players = pygame.sprite.Group(P1)
 background = pygame.sprite.Group(ground)
 bricks = pygame.sprite.Group()
+bullets = pygame.sprite.Group()
 started = True
 add_bricks_event = pygame.USEREVENT
-#pygame.time.set_timer(add_bricks_event, BRICK_FREQ)
+pygame.time.set_timer(add_bricks_event, BRICK_FREQ)
 
 
 
@@ -286,12 +339,17 @@ while True:
     P1.move()
     for brick in bricks:
         brick.move()
-    
+    for bullet in bullets:
+        bullet.move()
+    # check collision between bullet and bricks.
+
     for entity in bricks:
         displaysurface.blit(entity.surf, entity.rect)
     for entity in background:
         displaysurface.blit(entity.surf, entity.rect)
     for entity in players:
+        displaysurface.blit(entity.surf, entity.rect)
+    for entity in bullets:
         displaysurface.blit(entity.surf, entity.rect)
         
     
