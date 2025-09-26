@@ -29,8 +29,6 @@ FLOOR_COLLISION_THRESHOLD = 2 # number of pixels distance at which we assume we 
 # Labels for directions
 LEFT = 0
 RIGHT = 1
-UP_LEFT = 2
-UP_RIGHT = 3
 
 FramePerSec = pygame.time.Clock()
  
@@ -64,15 +62,12 @@ class Brick(pygame.sprite.Sprite):
         x = position_to_x(tower, position)
         self.rect = self.surf.get_rect(topleft=(x, HEIGHT - BRICK_HEIGHT))
         pygame.draw.line(self.surf, (0, 0, 100), (0, 0), (BRICK_WIDTH, 0), width=1)
-        if not stairs:
-            self.stairs = 0
-            
-        elif random.random() > .99:
-            self.stairs = UP_LEFT  
-            pygame.draw.line(self.surf, (0, 0, 100), (0, 0), (BRICK_WIDTH, BRICK_HEIGHT))
-        else:
-            self.stairs = UP_RIGHT 
-            pygame.draw.line(self.surf, (0, 0, 100), (0, BRICK_HEIGHT), (BRICK_WIDTH, 0))
+        self.stairs = stairs
+        if stairs:
+            if tower == RIGHT:
+                pygame.draw.line(self.surf, (0, 0, 100), (0, 0), (BRICK_WIDTH, BRICK_HEIGHT))
+            else:
+                pygame.draw.line(self.surf, (0, 0, 100), (0, BRICK_HEIGHT), (BRICK_WIDTH, 0))
 
         self.pos = vec(self.rect.midbottom)
         self.goalY = self.pos.y
@@ -134,6 +129,8 @@ class Player(pygame.sprite.Sprite):
             if self.gun_angle < GUN_BOTTOM:
                 self.gun_angle = GUN_BOTTOM
         
+        if pressed_keys[K_1]:
+            add_bricks()
         # Check horizontal movement
         if pressed_keys[K_LEFT]:
             self.acc.x = -ACC
@@ -147,24 +144,31 @@ class Player(pygame.sprite.Sprite):
         if not under == self.previous_under:
             print("under", under)
         self.previous_under = under
+        under_stairs = getattr(under, "stairs", None)            
         behind = self.behind()
         if not behind == self.previous_behind:
             print("behind", behind) 
         self.previous_behind = behind
         stairs = getattr(behind, "stairs", None)
-        if stairs == UP_RIGHT:
-            stairs_y = behind.rect.bottom - max(0, self.pos.x - behind.rect.left)
-        elif stairs == UP_LEFT:
-            stairs_y = behind.rect.bottom - max(0, behind.rect.right - self.pos.x)
+        if stairs:
+            if self.tower == LEFT:
+                stairs_y = behind.rect.bottom - max(0, self.pos.x - behind.rect.left)
+            else:
+                stairs_y = behind.rect.bottom - max(0, behind.rect.right - self.pos.x)
         on_stairs = False
-        if stairs == UP_RIGHT and self.gun_angle > .5 and self.pos.x < behind.rect.left + 10 and behind.rect.bottom - self.pos.y <= FLOOR_COLLISION_THRESHOLD: # start climbing stairs
+        on_under_stairs = False
+        if stairs and self.gun_angle > .5 and self.pos.x < behind.rect.left + 10 and behind.rect.bottom - self.pos.y <= FLOOR_COLLISION_THRESHOLD: # start climbing stairs
             self.acc.y = 0
             self.vel.y = 0
             on_stairs = True
-        elif stairs == UP_RIGHT and behind.rect.left <= self.pos.x <= behind.rect.right and stairs_y - FLOOR_COLLISION_THRESHOLD <= self.pos.y <= min(stairs_y + FLOOR_COLLISION_THRESHOLD, behind.rect.bottom - FLOOR_COLLISION_THRESHOLD):
+        elif stairs and behind.rect.left <= self.pos.x <= behind.rect.right and max(stairs_y - FLOOR_COLLISION_THRESHOLD, behind.rect.top) <= self.pos.y <= min(stairs_y + FLOOR_COLLISION_THRESHOLD, behind.rect.bottom - FLOOR_COLLISION_THRESHOLD):
             self.acc.y = 0
             self.vel.y = 0
             on_stairs = True
+        elif under_stairs and self.gun_angle < .5 and self.pos.x > under.rect.right - 10 and self.pos.y + FLOOR_COLLISION_THRESHOLD >= under.rect.top:
+            self.acc.y = 0
+            self.vel.y = 0
+            on_under_stairs = True
         elif self.pos.y + FLOOR_COLLISION_THRESHOLD >= under.rect.top:
         # player is on, or just slightly above or below, the brick underneath
         # Note, this keeps player on rising platform (provided the platform doesn't rise too fast)
@@ -180,10 +184,15 @@ class Player(pygame.sprite.Sprite):
         self.pos += self.vel + 0.5 * self.acc
         if on_stairs:
             #TODO: check if still on stairs - may have moved off them! (although maybe we can just deal with that in the next cycle)
-            if stairs == UP_RIGHT:
+            if self.tower == LEFT:
                 self.pos.y = behind.rect.bottom - max(0, self.pos.x - behind.rect.left)
-            elif stairs == UP_LEFT:
+            else:
                 self.pos.y = behind.rect.bottom - max(0, behind.rect.right - self.pos.x)
+        if on_under_stairs:
+            if self.tower == LEFT:
+                self.pos.y = under.rect.bottom - max(0, self.pos.x - under.rect.left)
+            else:
+                self.pos.y = under.rect.bottom - max(0, under.rect.right - self.pos.x)
         if self.pos.x > WIDTH / 2 - PLAYER_SIZE / 2:  # can't go past middle 
             self.pos.x = WIDTH / 2 - PLAYER_SIZE / 2
         if self.pos.x < PLAYER_SIZE / 2:
@@ -202,7 +211,7 @@ class Player(pygame.sprite.Sprite):
         position = x_to_position(self.pos.x)
         if position is not None:
             for brick in self.bricks[position]:
-                if brick.rect.top <= self.pos.y <= brick.rect.bottom:
+                if brick.rect.top < self.pos.y <= brick.rect.bottom:
                     return brick
 
 
@@ -243,7 +252,7 @@ background = pygame.sprite.Group(ground)
 bricks = pygame.sprite.Group()
 started = True
 add_bricks_event = pygame.USEREVENT
-pygame.time.set_timer(add_bricks_event, BRICK_FREQ)
+#pygame.time.set_timer(add_bricks_event, BRICK_FREQ)
 
 
 
