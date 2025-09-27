@@ -5,7 +5,16 @@ import random
 import math
 pygame.init()
 vec = pygame.math.Vector2  # 2 for two dimensional
- 
+import sys
+
+# The major, minor version numbers your require
+MIN_VER = (3, 13)
+
+if sys.version_info[:2] < MIN_VER:
+    sys.exit(
+        "This game requires Python {}.{}.".format(*MIN_VER)
+    )
+    
 HEIGHT = 700
 WIDTH = 1000
 GRAVITY = .5
@@ -200,8 +209,6 @@ class Player(pygame.sprite.Sprite):
         
         # Check vertical movement
         under = self.under()
-        if not under == self.previous_under:
-            print("under", under)
         self.previous_under = under
         under_stairs = getattr(under, "stairs", None)            
         behind = self.behind()

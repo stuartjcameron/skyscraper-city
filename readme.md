@@ -1,28 +1,36 @@
-Skyscraper City
+# Skyscraper City
+Climb your skyscraper as it grows. Be the first to reach the trophy. Shoot your opponent's skyscraper.
+## Authorship
+Written by Stuart Cameron during PyWeek September 2025. All artwork created by Stuart Cameron.
+## To run the game
+Developed for Python 3.13 (probably works with earlier versions) with pygame 2.6.1.
 
-- Shoot your opponent's skyscraper and grow your own
-- Climb up it and reach the cloud to win
-- Your skyscraper grows from the bottom when you collect bricks
-- (?) Bricks appear at random. You also get extra bricks when you shoot your opponents' tower.
-- Controls: left / right. Up/down for stairs.
-    - Ctrl to fire. Hold down Ctrl longer to fire further.
-    - Up / down while holding Ctrl to change direction while firing
-    - Release Ctrl to release the missile
+To run, navigate to the game directory and enter:
+```
+pip install -r requirements.txt
+python3 run_game.py
+```
+## Controls
+### Player 1 (left side)
+W - rotate gun upwards
+A - move left
+S - rotate gun downwards
+D - move right
+left shift - fire
 
-Plan
-- Tue:
-    - Make skyscrapers that grow randomly, with blocks and staircases
-    - Make characters that can run up the skyscrapers
+### Player 2 (right side)
+Cursor keys - up/left/down/right
+comma - fire
 
-- Wed:
-    - Shooting mechanism
-    - Shooting damages the skyscrapers
-- Thu:
-    - Design computer's tactics for 1P mode
-- Fri:
-    - Make sprites and effects
-    - Add sound
+### Firing
+Holding down the fire key for longer makes your gun change colour and fire further.
 
-If time:
-    - Collecting bricks makes the skyscrapers grow (or grow faster)
-    - Alternative weapons cause more damage
+### Climbing slopes
+To climb a slope, point the gun upwards and move left/right towards it. To descend a slope, point the gun downwards.
+
+## Development
+On the to do list for this project:
+- 1-player mode with computer controlled player
+- Sound effects
+- Different weapons
+- Bonuses to boost your skyscraper's growth
