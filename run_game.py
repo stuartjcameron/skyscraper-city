@@ -26,6 +26,7 @@ RIGHT_TOWER_EDGE = WIDTH - (TOWER_WIDTH + 1) * BRICK_WIDTH   # left edge of the 
 BRICK_SPEED = .5
 BRICK_FREQ = 1000
 BRICK_CHANCE = .2   # probability of brick appearing in each column in each round
+BRICK_COLOUR = (100, 100, 100)
 
 ACC = .5
 FRIC = -0.12
@@ -40,7 +41,7 @@ BULLET_SIZE = 5
 BULLET_SPEED_MIN = 12
 BULLET_SPEED_MAX = 16
 
-WIN_PLATFORM_HEIGHT = 8        # No bricks you have to climb before reaching winning platform
+WIN_PLATFORM_HEIGHT = 10      # No bricks you have to climb before reaching winning platform
 
 # Labels for directions / commands
 LEFT = 0
@@ -48,7 +49,6 @@ RIGHT = 1
 UP = 2
 DOWN = 3
 FIRE = 4
-
 
 KEYS = { 
     1: {
@@ -66,11 +66,20 @@ KEYS = {
         K_RIGHT: RIGHT
     },
 }
+END_GAME_FONT = pygame.freetype.SysFont('sans', 40)
+
+#TODO
+# winning platform - adjust height
+# make it easier to climb slope and get on top of same brick - currently tends to fall off
+# too easy to slip down when bricks move up - adjust mechanics
+# TODO: give a warning before bricks grow - allowing player to move to best position
+# TODO: ensure bricks remain aligned - 1px gap can allow player to slip off!
 
 FramePerSec = pygame.time.Clock()
- 
 displaysurface = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Skyscraper city")
+sprites = {}    # global for all the sprites and groups
+
 
 def x_to_position(x):
     """ Convert an x coordinate to a position in the tower """
@@ -93,37 +102,31 @@ class Brick(pygame.sprite.Sprite):
     def __init__(self, tower, position, stairs):
         super().__init__()
         self.surf = pygame.Surface((BRICK_WIDTH, BRICK_HEIGHT))
-        self.surf.fill((100, 100, 100))
+        self.surf.fill(BRICK_COLOUR)
         self.tower = tower
         self.position = position
-        self.column = bricks_by_position[tower][position]
+        self.column = sprites["bricks_by_position"][tower][position]
         x = position_to_x(tower, position)
         self.rect = self.surf.get_rect(topleft=(x, HEIGHT - BRICK_HEIGHT))
-        pygame.draw.line(self.surf, (0, 0, 100), (0, 0), (BRICK_WIDTH, 0), width=1)
         self.stairs = stairs
-        if stairs:
-            if tower == RIGHT:
-                pygame.draw.line(self.surf, (0, 0, 100), (0, 0), (BRICK_WIDTH, BRICK_HEIGHT))
-            else:
-                pygame.draw.line(self.surf, (0, 0, 100), (0, BRICK_HEIGHT), (BRICK_WIDTH, 0))
-
         self.pos = vec(self.rect.midbottom)
         self.goalY = self.pos.y
         self.vel = vec(0, 0)
         self.acc = vec(0, GRAVITY)
         self.go_higher()
+        self.draw()
 
     def go_higher(self):
         self.goalY -= BRICK_HEIGHT
         self.moving_up = True
-    
+
     def below(self):
         """ Return the brick or ground that is below this brick """
         i = self.column.index(self)
         if i < len(self.column) - 1:
             return self.column[i + 1]
         else:
-            return ground
+            return sprites["ground"]
 
     def move(self):
         below = self.below()
@@ -140,25 +143,38 @@ class Brick(pygame.sprite.Sprite):
                     if self.pos.y >= self.goalY:
                         self.pos.y = self.goalY
                         self.moving_up = False
+                        
                 elif self.goalY < self.pos.y:
                     self.pos.y -= BRICK_SPEED
                     if self.pos.y <= self.goalY:
                         self.pos.y = self.goalY
                         self.moving_up = False
+                        
         self.rect.midbottom = self.pos
+        #self.draw()  # No need to redraw on each cycle - bricks stay the same
+
+    def draw(self):
+        self.surf.fill(BRICK_COLOUR)
+        pygame.draw.line(self.surf, (0, 0, 100), (0, 0), (BRICK_WIDTH, 0), width=1)
+        
+        if self.stairs:
+            if self.tower == RIGHT:
+                pygame.draw.line(self.surf, (0, 0, 100), (0, 0), (BRICK_WIDTH, BRICK_HEIGHT))
+            else:
+                pygame.draw.line(self.surf, (0, 0, 100), (0, BRICK_HEIGHT), (BRICK_WIDTH, 0))
 
     def __repr__(self):
         return f"Brick {self.tower}{self.position} top={self.rect.top} bottom={self.rect.bottom} left={self.rect.left} right={self.rect.right} stairs={self.stairs}"
 
 class Player(pygame.sprite.Sprite):
     """
-    TODO: Currently only works for left tower. Adjust movement to work for right tower too.
+    Sprite for a player (may be human or computer controlled)
     """
     def __init__(self, tower):
         super().__init__() 
         self.surf = pygame.Surface((PLAYER_SIZE, PLAYER_SIZE))
         self.tower = tower
-        self.bricks = bricks_by_position[tower]
+        self.bricks = sprites["bricks_by_position"][tower]
         self.surf.set_colorkey((255,255,255))
         self.gun_angle = .5
         if tower == LEFT:
@@ -171,7 +187,7 @@ class Player(pygame.sprite.Sprite):
         self.centre = vec(PLAYER_SIZE / 2, PLAYER_SIZE / 2)
         self.pos = vec(self.rect.midbottom)
         self.vel = vec(0,0)
-        self.previous_under = ground
+        self.previous_under = sprites["ground"]
         self.previous_behind = None
         self.shoot_start_time = None
         self.update()
@@ -190,12 +206,12 @@ class Player(pygame.sprite.Sprite):
             self.gun_angle += GUN_SPEED
             if self.gun_angle > GUN_TOP:
                 self.gun_angle = GUN_TOP
-            print('gun', self.gun_end())
+            #print('gun', self.gun_end())
         if DOWN in command:
             self.gun_angle -= GUN_SPEED
             if self.gun_angle < GUN_BOTTOM:
                 self.gun_angle = GUN_BOTTOM
-            print('gun', self.gun_end())
+            #print('gun', self.gun_end())
         
         if "cheat" in command:
             add_bricks()
@@ -284,7 +300,7 @@ class Player(pygame.sprite.Sprite):
 
     def finish_shoot(self):
         print('shoot', self.gun_end(), self.direction_vector(), pygame.time.get_ticks() - self.shoot_start_time)
-        bullets.add(Bullet(tower=self.tower,
+        sprites["bullets"].add(Bullet(tower=self.tower,
                            pos=self.rect.topleft + self.gun_end(),
                            direction=self.direction_vector(),
                            speed=self.shoot_power()))
@@ -297,10 +313,6 @@ class Player(pygame.sprite.Sprite):
 
     def behind(self):
         """ Check which brick is behind the player centre """
-        #if self.direction == LEFT:  # we check the left edge if facing left, right edge if facing right
-        #    position = x_to_position(self.rect.left)
-        #else:
-        #    position = x_to_position(self.rect.right)
         position = x_to_position(self.pos.x)
         if position is not None:
             for brick in self.bricks[position]:
@@ -309,14 +321,17 @@ class Player(pygame.sprite.Sprite):
 
 
     def under(self):
-        """ Check whether the player is over a brick or the ground 
+        """ Check whether the player is over a brick, the ground or the winning platform
           """
         position = x_to_position(self.pos.x)
         if position is not None:
             for brick in self.bricks[position]:
                 if self.pos.y - FLOOR_COLLISION_THRESHOLD <= brick.rect.top:  # player is above, or just slightly below, brick top
                     return brick  # We assume the highest are at the start of the list.        
-        return ground
+        wp = sprites["win_platform"].rect
+        if wp.left < self.pos.x < wp.right and self.pos.y <= wp.top:
+            return sprites["win_platform"]      
+        return sprites["ground"]
 
     def direction_vector(self):
         if self.direction == LEFT:
@@ -348,7 +363,7 @@ class Bullet(pygame.sprite.Sprite):
         self.hit_floor_time = None 
 
     def move(self):
-        if self.pos.y == ground.rect.top and self.hit_floor_time is not None and pygame.time.get_ticks() - self.hit_floor_time > 1000:
+        if self.pos.y == sprites["ground"].rect.top and self.hit_floor_time is not None and pygame.time.get_ticks() - self.hit_floor_time > 1000:
             print("bullet removed from ground", self)
             self.kill()
             return
@@ -357,14 +372,14 @@ class Bullet(pygame.sprite.Sprite):
         self.vel += self.acc
         self.rect.center = self.pos
 
-        if self.pos.y >= ground.rect.top and self.hit_floor_time is None:
-            self.pos.y = ground.rect.top
+        if self.pos.y >= sprites["ground"].rect.top and self.hit_floor_time is None:
+            self.pos.y = sprites["ground"].rect.top
             self.vel = vec(0, 0)
             self.acc = vec(0, 0)
             self.hit_floor_time = pygame.time.get_ticks()
             print("bullet hit ground", self, self.hit_floor_time)
             
-        collisions = pygame.sprite.spritecollide(self, bricks, False)
+        collisions = pygame.sprite.spritecollide(self, sprites["bricks"], False)
         for brick in collisions:
             if brick.tower != self.tower:
                 self.hit_brick(brick)
@@ -402,22 +417,7 @@ class Cup(pygame.sprite.Sprite):
         self.surf.set_colorkey((255,255,255))
         self.rect = self.surf.get_rect(midbottom=pos)
 
-bricks_by_position = {LEFT: [[] for _ in range(TOWER_WIDTH)],
-                      RIGHT: [[] for _ in range(TOWER_WIDTH)]} 
-ground = Platform(pos=(0, HEIGHT - BRICK_HEIGHT), width=WIDTH)
-win_platform = Platform(pos=(BRICK_WIDTH + TOWER_WIDTH * BRICK_WIDTH,
-                             HEIGHT - BRICK_HEIGHT * (2 + WIN_PLATFORM_HEIGHT)),
-                               width=WIDTH-2*BRICK_HEIGHT-2*TOWER_WIDTH*BRICK_HEIGHT)
-cup = Cup(pos=( win_platform.rect.centerx, win_platform.rect.top))
-players_dict = {1: Player(LEFT), 2: Player(RIGHT)}
-#P1 = Player(LEFT)
-players = pygame.sprite.Group(players_dict.values())
-background = pygame.sprite.Group(ground, win_platform, cup)
-bricks = pygame.sprite.Group()
-bullets = pygame.sprite.Group()
-started = True
-add_bricks_event = pygame.USEREVENT
-pygame.time.set_timer(add_bricks_event, BRICK_FREQ)
+
 
 
 def add_bricks():
@@ -428,14 +428,14 @@ def add_bricks():
             #staircase = random.choice(to_add)
             #print(to_add)
             for position in to_add:
-                for brick in bricks_by_position[tower][position]:
+                for brick in sprites["bricks_by_position"][tower][position]:
                     brick.go_higher()
                 if random.random() < .2:
                     brick = Brick(tower, position, True)
                 else:
                     brick = Brick(tower, position, False)
-                bricks.add(brick)
-                bricks_by_position[tower][position].append(brick)
+                sprites["bricks"].add(brick)
+                sprites["bricks_by_position"][tower][position].append(brick)
                 #print("at", tower, position)
 
 def remove_brick(brick):
@@ -443,7 +443,7 @@ def remove_brick(brick):
     c = brick.column
     brick.column.remove(brick)
     brick.kill()  
-    print(c)
+    
 
 # TODO: hitting bricks causes more damage to the surrounding bricks
 # TODO: animation of bricks getting hot then disintegrating
@@ -452,36 +452,71 @@ def explode_brick(brick):
     remove_brick(brick) # TODO:also remove the surrounding bricks
 
 
-        
-while True:
-    for event in pygame.event.get():
-        if event.type == QUIT:
-            pygame.quit()
-            sys.exit()
-        if event.type == USEREVENT:
-            add_bricks()
-
-    displaysurface.fill((0,102,204))
-    pressed_keys = pygame.key.get_pressed()
-    for i, player in players_dict.items():
-        keyboard_input = {command for key, command in KEYS[i].items() if pressed_keys[key]}
-        player.move(keyboard_input)
-    for brick in bricks:
-        brick.move()
-    for bullet in bullets:
-        bullet.move()
-     
-
-    for entity in bricks:
-        displaysurface.blit(entity.surf, entity.rect)
-    for entity in background:
-        displaysurface.blit(entity.surf, entity.rect)
-    for entity in players:
-        displaysurface.blit(entity.surf, entity.rect)
-    for entity in bullets:
-        displaysurface.blit(entity.surf, entity.rect)
-        
+def initial_set_up():
+    sprites["bricks_by_position"] = {LEFT: [[] for _ in range(TOWER_WIDTH)],
+                      RIGHT: [[] for _ in range(TOWER_WIDTH)]} 
+    sprites["ground"] = Platform(pos=(0, HEIGHT - BRICK_HEIGHT), width=WIDTH)
+    sprites["win_platform"] = Platform(pos=(BRICK_WIDTH + TOWER_WIDTH * BRICK_WIDTH,
+                             HEIGHT - (BRICK_HEIGHT - 1) * (1 + WIN_PLATFORM_HEIGHT)) + 2,
+                        width=WIDTH-2*BRICK_HEIGHT-2*TOWER_WIDTH*BRICK_HEIGHT) 
+    sprites["cup"] = Cup(pos=(sprites["win_platform"].rect.centerx, sprites["win_platform"].rect.top))
+    sprites["players_dict"] = {1: Player(LEFT), 2: Player(RIGHT)}
+    sprites["players_group"] = pygame.sprite.Group(sprites["players_dict"].values())
+    sprites["background"] = pygame.sprite.Group(sprites["ground"], sprites["win_platform"], sprites["cup"])
+    sprites["bricks"] = pygame.sprite.Group()
+    sprites["bullets"] = pygame.sprite.Group()
     
-    pygame.display.update()
-    FramePerSec.tick(FPS)
+#TODO: display end game message till user presses key then restart game
+while True:
+    initial_set_up()
+    pygame.time.set_timer(USEREVENT, BRICK_FREQ)
+    end_message = None
+    loop = True
+    while loop:
+        for event in pygame.event.get():
+            if event.type == QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == USEREVENT:
+                add_bricks()
+
+        displaysurface.fill((0,102,204))
+        pressed_keys = pygame.key.get_pressed()
+        if end_message:
+            if pressed_keys[K_RETURN]:
+                loop = False
+        else:
+            for i, player in sprites["players_dict"].items():
+                keyboard_input = {command for key, command in KEYS[i].items() if pressed_keys[key]}
+                player.move(keyboard_input)
+            for brick in sprites["bricks"]:
+                brick.move()
+            for bullet in sprites["bullets"]:
+                bullet.move()
+            winners = pygame.sprite.spritecollide(sprites["cup"], sprites["players_group"], False)
+            if len(winners) == 1:
+                if winners[0] == sprites["players_dict"][1]:
+                    end_message = "PLAYER 1 WINS!"
+                elif winners[0] == sprites["players_dict"][2]:
+                    end_message = "PLAYER 1 WINS!"
+            elif len(winners) == 2:
+                end_message = "DRAW!" 
+
+        # Draw everything
+        for entity in sprites["bricks"]:
+            displaysurface.blit(entity.surf, entity.rect)
+        for entity in sprites["background"]:
+            displaysurface.blit(entity.surf, entity.rect)
+        for entity in sprites["players_group"]:
+            displaysurface.blit(entity.surf, entity.rect)
+        for entity in sprites["bullets"]:
+            displaysurface.blit(entity.surf, entity.rect)
+        if end_message is not None:
+            text_surf, text_rect = END_GAME_FONT.render(end_message)
+            text_rect.center = (WIDTH / 2, HEIGHT / 2)
+            displaysurface.blit(text_surf, text_rect)
+        pygame.display.update()
+        FramePerSec.tick(FPS)
+    pygame.time.set_timer(USEREVENT, 0)   # remove timer
+
     
