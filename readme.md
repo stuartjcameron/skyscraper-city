@@ -1,4 +1,6 @@
-# Skyscraper City
+# Skyscraper Destruction Race
+My entry for the Skyscraper City PyWeek challenge.
+
 Climb your skyscraper as it grows. Be the first to reach the trophy. Shoot your opponent's skyscraper.
 ## Authorship
 Written by Stuart Cameron during PyWeek September 2025. All artwork created by Stuart Cameron.
