@@ -14,15 +14,15 @@ python3 run_game.py
 ```
 ## Controls
 ### Player 1 (left side)
-W - rotate gun upwards
-A - move left
-S - rotate gun downwards
-D - move right
-left shift - fire
+* W - rotate gun upwards
+* A - move left
+* S - rotate gun downwards
+* D - move right
+* left shift - fire
 
 ### Player 2 (right side)
-Cursor keys - up/left/down/right
-comma - fire
+* Cursor keys - up/left/down/right
+* comma - fire
 
 ### Firing
 Holding down the fire key for longer makes your gun change colour and fire further.
