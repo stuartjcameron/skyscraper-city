@@ -3,10 +3,7 @@ Skyscraper Destruction Race
 Race to the cup up a growing skyscraper while destroying your opponent's.
 
 """
-# TODO make it easier to climb slope and get on top of same brick - currently tends to fall off
 # TODO too easy to slip down when bricks move up - adjust mechanics
-# TODO ensure bricks remain aligned - 1px gap can allow player to slip off. Currently they seem to rise a little too far then
-# sink back.
 # TODO hitting bricks causes more damage to the surrounding bricks
 # TODO animation of bricks getting hot then disintegrating
 
@@ -45,7 +42,8 @@ COLOURS = {
     "platform": (204, 102, 0),
     "tower_marker": (0, 80, 0),
     "player": (30, 30, 30),
-    "bullet": (0, 0, 0)
+    "bullet": (0, 0, 0),
+    "sky": (130, 178, 212) #(156, 214, 254) #(0,102,204)
 }
 
 ACC = .5
@@ -87,16 +85,18 @@ KEYS = {
     },
 }
 END_GAME_FONT = pygame.freetype.SysFont('sans', 40)
+ADD_BRICKS = pygame.event.custom_type()
 
 
 
 
-
-FramePerSec = pygame.time.Clock()
-displaysurface = pygame.display.set_mode((WIDTH, HEIGHT))
+clock = pygame.time.Clock()
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Skyscraper city")
 sprites = {}    # global for all the sprites and groups
 
+def clamp(n, minn, maxn):
+    return max(min(maxn, n), minn)
 
 def x_to_position(x):
     """ Convert an x coordinate to a position in the tower """
@@ -114,47 +114,28 @@ def position_to_x(tower, position):
     else:
         return RIGHT_TOWER_EDGE + position * BRICK_WIDTH
 
-class TowerMarker(pygame.sprite.Sprite):
-    """ Stationery sprite that marks when a tower is about to grow and hides when it isn't """
-    def __init__(self, tower, position):
-        super().__init__()
-        self.surf = pygame.Surface((BRICK_WIDTH, BRICK_HEIGHT))
-        self.surf.set_colorkey((255, 255, 255))
-        self.left = position_to_x(tower, position)
-        self.top = sprites["ground"].rect.top
-        self.rect = self.surf.get_rect(topleft=(self.left, self.top))
-        self.draw()
-    
-    def draw(self):
-        self.surf.fill((255, 255, 255))
-        #pygame.draw.circle(self.surf, (0,0,0), (self.rect.width / 2, self.rect.height / 2), 10, width=0)
-        pygame.draw.polygon(self.surf, COLOURS["tower_marker"], [
-            (self.rect.width / 2, 0),
-            (self.rect.width, self.rect.height / 2),
-            (0, self.rect.height / 2)
-        ], width=0)
          
 
 class Brick(pygame.sprite.Sprite):
     """ Bricks appear in the floor and move up one space, pushing up everything above them """
     def __init__(self, tower, position, stairs):
         super().__init__()
-        self.surf = pygame.Surface((BRICK_WIDTH, BRICK_HEIGHT))
+        self.image = pygame.Surface((BRICK_WIDTH, BRICK_HEIGHT))
         self.tower = tower
         self.column = sprites["bricks_by_position"][tower][position]
         self.below = sprites["ground"]
         if self.column:
             self.column[-1].below = self
-        self.rect = self.surf.get_rect(topleft=(position_to_x(tower, position), sprites["ground"].rect.top))
+        self.rect = self.image.get_rect(topleft=(position_to_x(tower, position), sprites["ground"].rect.top))
         self.stairs = stairs
         self.speed = 0
-        self.surf.fill(COLOURS["brick"])
-        pygame.draw.line(self.surf, COLOURS["brick_line"], (0, 0), (BRICK_WIDTH, 0), width=1)
+        self.image.fill(COLOURS["brick"])
+        pygame.draw.line(self.image, COLOURS["brick_line"], (0, 0), (BRICK_WIDTH, 0), width=1)
         if stairs:
             if tower == RIGHT:
-                pygame.draw.line(self.surf, COLOURS["brick_line"], (0, 0), (BRICK_WIDTH, BRICK_HEIGHT))
+                pygame.draw.line(self.image, COLOURS["brick_line"], (0, 0), (BRICK_WIDTH, BRICK_HEIGHT))
             else:
-                pygame.draw.line(self.surf, COLOURS["brick_line"], (0, BRICK_HEIGHT), (BRICK_WIDTH, 0))
+                pygame.draw.line(self.image, COLOURS["brick_line"], (0, BRICK_HEIGHT), (BRICK_WIDTH, 0))
 
     @classmethod
     def choose_columns(cls):
@@ -175,14 +156,14 @@ class Brick(pygame.sprite.Sprite):
 
     def move(self):
         goal = self.below.rect.top
-        if goal > self.rect.bottom:  # nothing directly under us, so fall
+        if goal == self.rect.bottom:
+            self.speed = 0
+        elif goal > self.rect.bottom:  # nothing directly under us, so fall
             self.rect.bottom = min(goal, self.rect.bottom + self.speed + .5 * GRAVITY)
             self.speed += GRAVITY
-        elif goal < self.rect.bottom: # overlapping so shift up
+        else: # overlapping so shift up
             self.speed = 0
             self.rect.bottom = max(goal, self.rect.bottom - BRICK_SPEED)
-        else:
-            self.speed = 0              
         
     def kill(self):
         # TODO: add animation stage
@@ -198,7 +179,7 @@ class Brick(pygame.sprite.Sprite):
         pass
 
     def __repr__(self):
-        return f"Brick {x_to_position(self.rect.midbottom)} midbottom={self.rect.midbottom} stairs={self.stairs}"
+        return f"Brick {x_to_position(self.rect.left)} midbottom={self.rect.midbottom} stairs={self.stairs}"
 
 class Player(pygame.sprite.Sprite):
     """
@@ -206,10 +187,10 @@ class Player(pygame.sprite.Sprite):
     """
     def __init__(self, tower):
         super().__init__() 
-        self.surf = pygame.Surface((PLAYER_SIZE, PLAYER_SIZE))
+        self.image = pygame.Surface((PLAYER_SIZE, PLAYER_SIZE))
         self.tower = tower
         self.bricks = sprites["bricks_by_position"][tower]
-        self.surf.set_colorkey((255,255,255))
+        self.image.set_colorkey((255,255,255))
         self.gun_angle = .5
         if tower == LEFT:
             self.direction = RIGHT
@@ -217,7 +198,7 @@ class Player(pygame.sprite.Sprite):
         else:
             self.direction = LEFT
             start_x = WIDTH - PLAYER_SIZE
-        self.rect = self.surf.get_rect(topleft = (start_x, HEIGHT - BRICK_HEIGHT - PLAYER_SIZE))
+        self.rect = self.image.get_rect(topleft = (start_x, HEIGHT - BRICK_HEIGHT - PLAYER_SIZE))
         self.centre = vec(PLAYER_SIZE / 2, PLAYER_SIZE / 2)
         self.pos = vec(self.rect.midbottom)
         self.vel = vec(0,0)
@@ -240,13 +221,10 @@ class Player(pygame.sprite.Sprite):
             self.gun_angle += GUN_SPEED
             if self.gun_angle > GUN_TOP:
                 self.gun_angle = GUN_TOP
-            #print('gun', self.gun_end())
         if DOWN in command:
             self.gun_angle -= GUN_SPEED
             if self.gun_angle < GUN_BOTTOM:
-                self.gun_angle = GUN_BOTTOM
-            #print('gun', self.gun_end())
-        
+                self.gun_angle = GUN_BOTTOM        
         
         # Check horizontal movement
         if LEFT in command:
@@ -258,37 +236,41 @@ class Player(pygame.sprite.Sprite):
         
         # Check vertical movement
         under = self.under()
-        self.previous_under = under
-        under_stairs = getattr(under, "stairs", None)            
+        stairs_under = getattr(under, "stairs", None)            
         behind = self.behind()
-        # if not behind == self.previous_behind:
-            # print("behind", behind) 
+        if behind != self.previous_behind:
+            print("behind", behind)
         self.previous_behind = behind
-        stairs = getattr(behind, "stairs", None)
-        if stairs:
+        stairs_behind = getattr(behind, "stairs", None)
+        if stairs_behind:
             if self.tower == LEFT:
                 stairs_y = behind.rect.bottom - max(0, self.pos.x - behind.rect.left)
             else:
                 stairs_y = behind.rect.bottom - max(0, behind.rect.right - self.pos.x)
-        on_stairs = False
-        on_under_stairs = False
+            
+        on_stairs_behind = False
+        on_stairs_under = False
 
-        if (stairs and self.gun_angle > .5 and 
+        if (stairs_behind and self.gun_angle > .5 and 
             ((self.pos.x < behind.rect.left + 10 and self.tower == LEFT) or (self.pos.x > behind.rect.right - 10 and self.tower == RIGHT)) and
             behind.rect.bottom - self.pos.y <= FLOOR_COLLISION_THRESHOLD): # start climbing stairs
             self.acc.y = 0
             self.vel.y = 0
-            on_stairs = True
-        elif stairs and behind.rect.left <= self.pos.x <= behind.rect.right and max(stairs_y - FLOOR_COLLISION_THRESHOLD, behind.rect.top) <= self.pos.y <= min(stairs_y + FLOOR_COLLISION_THRESHOLD, behind.rect.bottom - FLOOR_COLLISION_THRESHOLD):
+            on_stairs_behind = True
+        elif stairs_behind and behind.rect.left <= self.pos.x <= behind.rect.right and max(stairs_y - FLOOR_COLLISION_THRESHOLD, behind.rect.top) <= self.pos.y <= min(stairs_y + FLOOR_COLLISION_THRESHOLD, behind.rect.bottom - FLOOR_COLLISION_THRESHOLD):
             self.acc.y = 0
             self.vel.y = 0
-            on_stairs = True
-        elif (under_stairs and self.gun_angle < .5 and 
+            if stairs_y - behind.rect.top <= FLOOR_COLLISION_THRESHOLD * 2:
+                self.pos.y = behind.rect.top  # shunt up to the top...
+                print("shunted")
+            else:
+                on_stairs_behind = True
+        elif (stairs_under and self.gun_angle < .5 and 
               ((self.pos.x > under.rect.right - 10 and self.tower == LEFT) or (self.pos.x < under.rect.left + 10 and self.tower == RIGHT)) and
                 self.pos.y + FLOOR_COLLISION_THRESHOLD >= under.rect.top):
             self.acc.y = 0
             self.vel.y = 0
-            on_under_stairs = True
+            on_stairs_under = True
         elif self.pos.y + FLOOR_COLLISION_THRESHOLD >= under.rect.top:
         # player is on, or just slightly above or below, the brick underneath
         # Note, this keeps player on rising platform (provided the platform doesn't rise too fast)
@@ -302,28 +284,25 @@ class Player(pygame.sprite.Sprite):
         self.acc.x += self.vel.x * FRIC
         self.vel += self.acc
         self.pos += self.vel + 0.5 * self.acc
-        if on_stairs:
-            #TODO: check if still on stairs - may have moved off them! (although maybe we can just deal with that in the next cycle)
+        if on_stairs_behind:
             if self.tower == LEFT:
                 self.pos.y = behind.rect.bottom - max(0, self.pos.x - behind.rect.left)
             else:
                 self.pos.y = behind.rect.bottom - max(0, behind.rect.right - self.pos.x)
-        if on_under_stairs:
+        if on_stairs_under:
             if self.tower == LEFT:
                 self.pos.y = under.rect.bottom - max(0, self.pos.x - under.rect.left)
             else:
                 self.pos.y = under.rect.bottom - max(0, under.rect.right - self.pos.x)
+
+        # Keep player in their side (can't go past the middle)
         if self.tower == LEFT:
-            if self.pos.x > WIDTH / 2 - PLAYER_SIZE / 2:  # can't go past middle 
-                self.pos.x = WIDTH / 2 - PLAYER_SIZE / 2
-            if self.pos.x < PLAYER_SIZE / 2:
-                self.pos.x = PLAYER_SIZE / 2
-        if self.tower == RIGHT:
-            if self.pos.x > WIDTH - PLAYER_SIZE / 2:  # can't go past middle 
-                self.pos.x = WIDTH - PLAYER_SIZE / 2
-            if self.pos.x < WIDTH / 2 + PLAYER_SIZE / 2:
-                self.pos.x = WIDTH / 2 + PLAYER_SIZE / 2
-        if self.vel.y > 0 and self.pos.y > under.rect.top:   # Check if we've fallen too far
+            self.pos.x = clamp(self.pos.x, PLAYER_SIZE / 2, WIDTH / 2 - PLAYER_SIZE / 2)
+        else:
+            self.pos.x = clamp(self.pos.x, WIDTH / 2 + PLAYER_SIZE / 2, WIDTH - PLAYER_SIZE / 2)
+        
+        # check if we've fallen too far
+        if self.vel.y > 0 and self.pos.y > under.rect.top:   
             self.pos.y = under.rect.top
         self.rect.midbottom = self.pos        
         self.update()
@@ -376,10 +355,10 @@ class Player(pygame.sprite.Sprite):
         return self.centre + self.direction_vector() * PLAYER_SIZE * .4
     
     def update(self):
-        self.surf.fill((255, 255, 255))
-        pygame.draw.circle(self.surf, COLOURS["player"], self.centre, PLAYER_SIZE * .3, width=0)
+        self.image.fill((255, 255, 255))
+        pygame.draw.circle(self.image, COLOURS["player"], self.centre, PLAYER_SIZE * .3, width=0)
         red = 255 * self.shoot_power()
-        pygame.draw.line(self.surf, (red, 30, 100), self.centre, self.gun_end(), width=3)
+        pygame.draw.line(self.image, (red, 30, 100), self.centre, self.gun_end(), width=3)
 
 class Bullet(pygame.sprite.Sprite):
     """ Bullet goes straight through first brick it touches. Second brick explodes destroying all the bricks around it. """
@@ -389,34 +368,33 @@ class Bullet(pygame.sprite.Sprite):
         self.pos = pos
         self.vel = direction * (BULLET_SPEED_MIN + speed * (BULLET_SPEED_MAX - BULLET_SPEED_MIN))
         self.acc = vec(0, GRAVITY)
-        self.surf = pygame.Surface((BULLET_SIZE, BULLET_SIZE))
-        self.surf.set_colorkey((255,255,255))
+        self.image = pygame.Surface((BULLET_SIZE, BULLET_SIZE))
         self.hit = None
-        self.rect = self.surf.get_rect(center=pos)    
+        self.rect = self.image.get_rect(center=pos)    
         self.hit_floor_time = None 
+        self.image.fill(COLOURS["bullet"])
 
     def move(self):
-        if self.pos.y == sprites["ground"].rect.top and self.hit_floor_time is not None and pygame.time.get_ticks() - self.hit_floor_time > 1000:
+        if self.pos.y >= sprites["ground"].rect.top and self.hit_floor_time is not None and pygame.time.get_ticks() - self.hit_floor_time > 1000:
             print("bullet removed from ground", self)
             self.kill()
             return
         
         self.pos += self.vel + .5 * self.acc
         self.vel += self.acc
-        self.rect.center = self.pos
 
         if self.pos.y >= sprites["ground"].rect.top and self.hit_floor_time is None:
             self.pos.y = sprites["ground"].rect.top
             self.vel = vec(0, 0)
             self.acc = vec(0, 0)
             self.hit_floor_time = pygame.time.get_ticks()
-            print("bullet hit ground", self, self.hit_floor_time)
+        
+        self.rect.center = self.pos
             
         collisions = pygame.sprite.spritecollide(self, sprites["bricks"], False)
         for brick in collisions:
             if brick.tower != self.tower:
                 self.hit_brick(brick)
-        self.update()
 
     def hit_brick(self, brick):
         brick.kill()
@@ -428,27 +406,35 @@ class Bullet(pygame.sprite.Sprite):
             brick.kill()
         else:   # then make the next one explode taking the surrounding bricks with it
             brick.explode()
-        self.kill() 
-
-    def update(self):
-        self.surf.fill((255, 255, 255))
-        pygame.draw.circle(self.surf, COLOURS["bullet"], (BULLET_SIZE / 2, BULLET_SIZE / 2), BULLET_SIZE, width=0)
-
+        self.kill()         
 
 class Platform(pygame.sprite.Sprite):
     def __init__(self, pos, width):
         super().__init__()
-        self.surf = pygame.Surface((width, BRICK_HEIGHT))
-        self.surf.fill(COLOURS["platform"])
-        self.rect = self.surf.get_rect(topleft=pos)
+        self.image = pygame.Surface((width, BRICK_HEIGHT))
+        self.image.fill(COLOURS["platform"])
+        self.rect = self.image.get_rect(bottomleft=pos)
 
 class Cup(pygame.sprite.Sprite):
     def __init__(self, pos):
         super().__init__()
-        self.surf = pygame.image.load("cup.png")
-        self.surf.set_colorkey((255,255,255))
-        self.rect = self.surf.get_rect(midbottom=pos)
+        self.image = pygame.image.load("cup.png")
+        self.image.set_colorkey((255,255,255))
+        self.rect = self.image.get_rect(midbottom=pos)
 
+class TowerMarker(pygame.sprite.Sprite):
+    """ Stationery sprite that marks when a tower is about to grow and hides when it isn't """
+    def __init__(self, tower, position):
+        super().__init__()
+        self.image = pygame.Surface((BRICK_WIDTH, BRICK_HEIGHT))
+        self.rect = self.image.get_rect(topleft=(position_to_x(tower, position), sprites["ground"].rect.top))
+        self.image.set_colorkey((255, 255, 255))
+        self.image.fill((255, 255, 255))
+        pygame.draw.polygon(self.image, COLOURS["tower_marker"], [
+            (self.rect.width / 2, 0),
+            (self.rect.width, self.rect.height / 2),
+            (0, self.rect.height / 2)
+        ], width=0)
 
 
 
@@ -457,10 +443,10 @@ def initial_set_up():
         LEFT: [[] for _ in range(TOWER_WIDTH)],
         RIGHT: [[] for _ in range(TOWER_WIDTH)]
         }
-    sprites["ground"] = Platform(pos=(0, HEIGHT - BRICK_HEIGHT), width=WIDTH)
+    sprites["ground"] = Platform(pos=(0, HEIGHT), width=WIDTH)
     sprites["tower_marker"] = {tower: [TowerMarker(tower, position) for position in range(TOWER_WIDTH)] for tower in [LEFT, RIGHT]}
     sprites["win_platform"] = Platform(pos=(BRICK_WIDTH + TOWER_WIDTH * BRICK_WIDTH,
-                             HEIGHT - (BRICK_HEIGHT - 1) * (1 + WIN_PLATFORM_HEIGHT) + 2),
+                             HEIGHT - BRICK_HEIGHT * WIN_PLATFORM_HEIGHT),
                         width=WIDTH-2*BRICK_HEIGHT-2*TOWER_WIDTH*BRICK_HEIGHT) 
     sprites["cup"] = Cup(pos=(sprites["win_platform"].rect.centerx, sprites["win_platform"].rect.top))
     sprites["players_dict"] = {1: Player(LEFT), 2: Player(RIGHT)}
@@ -472,30 +458,32 @@ def initial_set_up():
 while True:
     initial_set_up()
     Brick.choose_columns()
-    pygame.time.set_timer(USEREVENT, BRICK_FREQ)
+    #pygame.time.set_timer(ADD_BRICKS, BRICK_FREQ)
     end_message = None
     while True:
         for event in pygame.event.get():
             if event.type == QUIT:
                 pygame.quit()
                 sys.exit()
-            if event.type == USEREVENT:
+            if event.type == ADD_BRICKS:
                 Brick.add()
                 Brick.choose_columns()
 
-        displaysurface.fill((0,102,204))
         pressed_keys = pygame.key.get_pressed()
         if end_message:
             if pressed_keys[K_RETURN]:
                 break
         else:
+            if pressed_keys[K_1]:
+                Brick.add()
+                Brick.choose_columns()
             for i, player in sprites["players_dict"].items():
                 keyboard_input = {command for key, command in KEYS[i].items() if pressed_keys[key]}
                 player.move(keyboard_input)
-            for brick in sprites["bricks"]:
-                brick.move()
-            for bullet in sprites["bullets"]:
-                bullet.move()
+            for group in ["bricks", "bullets"]:
+                for sprite in sprites[group]:
+                    sprite.move()
+                    
             winners = pygame.sprite.spritecollide(sprites["cup"], sprites["players_group"], False)
             if len(winners) == 1:
                 if winners[0] == sprites["players_dict"][1]:
@@ -506,21 +494,22 @@ while True:
                 end_message = "DRAW!" 
 
         # Draw everything
+        screen.fill(COLOURS["sky"])
         for group in ["bricks", "background", "players_group", "bullets"]:
-            for entity in sprites[group]:
-                displaysurface.blit(entity.surf, entity.rect)
+            sprites[group].draw(screen)
 
         for tower, columns in Brick.chosen_columns.items():
             for column in columns:
                 marker = sprites["tower_marker"][tower][column]
-                displaysurface.blit(marker.surf, marker.rect)
+                screen.blit(marker.image, marker.rect)
 
         if end_message is not None:
             text_surf, text_rect = END_GAME_FONT.render(end_message)
             text_rect.center = (WIDTH / 2, HEIGHT / 2)
-            displaysurface.blit(text_surf, text_rect)
+            screen.blit(text_surf, text_rect)
+            pygame.time.set_timer(USEREVENT, 0)   # remove timer
         pygame.display.update()
-        FramePerSec.tick(FPS)
-    pygame.time.set_timer(USEREVENT, 0)   # remove timer
+        clock.tick(FPS)
+    #pygame.time.set_timer(USEREVENT, 0)   # remove timer
 
     
