@@ -41,6 +41,7 @@ BRICK_CHANCE = .2   # probability of brick appearing in each column in each roun
 
 COLOURS = {
     "brick": (100, 100, 100),
+    "brick_line": (0, 0, 100),
     "platform": (204, 102, 0),
     "tower_marker": (0, 80, 0),
     "player": (30, 30, 30),
@@ -139,19 +140,21 @@ class Brick(pygame.sprite.Sprite):
     def __init__(self, tower, position, stairs):
         super().__init__()
         self.surf = pygame.Surface((BRICK_WIDTH, BRICK_HEIGHT))
-        self.surf.fill(COLOURS["brick"])
         self.tower = tower
-        self.position = position
         self.column = sprites["bricks_by_position"][tower][position]
-        x = position_to_x(tower, position)
-        self.rect = self.surf.get_rect(topleft=(x, sprites["ground"].rect.top))
+        self.below = sprites["ground"]
+        if self.column:
+            self.column[-1].below = self
+        self.rect = self.surf.get_rect(topleft=(position_to_x(tower, position), sprites["ground"].rect.top))
         self.stairs = stairs
-        self.pos = vec(self.rect.midbottom)
-        self.goalY = self.pos.y
-        self.vel = vec(0, 0)
-        self.acc = vec(0, GRAVITY)
-        self.go_higher()
-        self.draw()
+        self.speed = 0
+        self.surf.fill(COLOURS["brick"])
+        pygame.draw.line(self.surf, COLOURS["brick_line"], (0, 0), (BRICK_WIDTH, 0), width=1)
+        if stairs:
+            if tower == RIGHT:
+                pygame.draw.line(self.surf, COLOURS["brick_line"], (0, 0), (BRICK_WIDTH, BRICK_HEIGHT))
+            else:
+                pygame.draw.line(self.surf, COLOURS["brick_line"], (0, BRICK_HEIGHT), (BRICK_WIDTH, 0))
 
     @classmethod
     def choose_columns(cls):
@@ -160,10 +163,9 @@ class Brick(pygame.sprite.Sprite):
 
     @classmethod    
     def add(cls):
+        """ Add bricks in the positions chosen earlier """
         for tower, positions in cls.chosen_columns.items():
             for position in positions:
-                for brick in sprites["bricks_by_position"][tower][position]:
-                    brick.go_higher()
                 if random.random() < .2:
                     brick = cls(tower, position, True)
                 else:
@@ -171,56 +173,24 @@ class Brick(pygame.sprite.Sprite):
                 sprites["bricks"].add(brick)
                 sprites["bricks_by_position"][tower][position].append(brick)
 
-    def go_higher(self):
-        self.goalY -= BRICK_HEIGHT
-        self.moving_up = True
-
-    def below(self):
-        """ Return the brick or ground that is below this brick """
-        i = self.column.index(self)
-        if i < len(self.column) - 1:
-            return self.column[i + 1]
-        else:
-            return sprites["ground"]
-
     def move(self):
-        below = self.below()
-        if below.rect.top - 1 > self.pos.y:  # nothing directly under us, so fall
-            step = min(below.rect.top + 1 - self.pos.y, self.vel.y + .5 * self.acc.y)
-            self.pos.y += step
-            self.goalY += step
-            self.vel.y += self.acc.y
-            print("fall", self ,step)
-        else:                           # brick / ground directly below us. May need to move up for another brick underneath.
-            self.vel = vec(0, 0)
-            if self.moving_up:
-                if self.goalY > self.pos.y:
-                    self.pos.y += BRICK_SPEED
-                    if self.pos.y >= self.goalY:
-                        self.pos.y = self.goalY
-                        self.moving_up = False
-                        
-                elif self.goalY < self.pos.y:
-                    self.pos.y -= BRICK_SPEED
-                    if self.pos.y <= self.goalY:
-                        self.pos.y = self.goalY
-                        self.moving_up = False
-                        
-        self.rect.midbottom = self.pos
-        #self.draw()  # No need to redraw on each cycle - bricks stay the same
-
-    def draw(self):
-        self.surf.fill(COLOURS["brick"])
-        pygame.draw.line(self.surf, (0, 0, 100), (0, 0), (BRICK_WIDTH, 0), width=1)
+        goal = self.below.rect.top
+        if goal > self.rect.bottom:  # nothing directly under us, so fall
+            self.rect.bottom = min(goal, self.rect.bottom + self.speed + .5 * GRAVITY)
+            self.speed += GRAVITY
+        elif goal < self.rect.bottom: # overlapping so shift up
+            self.speed = 0
+            self.rect.bottom = max(goal, self.rect.bottom - BRICK_SPEED)
+        else:
+            self.speed = 0              
         
-        if self.stairs:
-            if self.tower == RIGHT:
-                pygame.draw.line(self.surf, (0, 0, 100), (0, 0), (BRICK_WIDTH, BRICK_HEIGHT))
-            else:
-                pygame.draw.line(self.surf, (0, 0, 100), (0, BRICK_HEIGHT), (BRICK_WIDTH, 0))
-    
     def kill(self):
         # TODO: add animation stage
+
+        # We need to update the 'below' property of the brick that is above self
+        for brick in self.column:
+            if brick.below == self:
+                brick.below = self.below
         self.column.remove(self)
         super().kill()
 
@@ -228,7 +198,7 @@ class Brick(pygame.sprite.Sprite):
         pass
 
     def __repr__(self):
-        return f"Brick {self.tower}{self.position} top={self.rect.top} bottom={self.rect.bottom} left={self.rect.left} right={self.rect.right} stairs={self.stairs}"
+        return f"Brick {x_to_position(self.rect.midbottom)} midbottom={self.rect.midbottom} stairs={self.stairs}"
 
 class Player(pygame.sprite.Sprite):
     """
