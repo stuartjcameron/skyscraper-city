@@ -2,6 +2,8 @@
 My entry for the Skyscraper City PyWeek challenge.
 
 Climb your skyscraper as it grows. Be the first to reach the trophy. Shoot your opponent's skyscraper.
+![screenshot](screenshot.png?raw=true "Screenshot")
+
 ## Authorship
 Written by Stuart Cameron during PyWeek September 2025. All artwork created by Stuart Cameron.
 ## To run the game
@@ -14,15 +16,15 @@ python3 run_game.py
 ```
 ## Controls
 ### Player 1 (left side)
-W - rotate gun upwards
-A - move left
-S - rotate gun downwards
-D - move right
-left shift - fire
+* W - rotate gun upwards
+* A - move left
+* S - rotate gun downwards
+* D - move right
+* left shift - fire
 
 ### Player 2 (right side)
-Cursor keys - up/left/down/right
-comma - fire
+* Cursor keys - up/left/down/right
+* comma - fire
 
 ### Firing
 Holding down the fire key for longer makes your gun change colour and fire further.
