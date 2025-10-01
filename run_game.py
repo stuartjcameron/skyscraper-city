@@ -1,11 +1,23 @@
+""" 
+Skyscraper Destruction Race
+Race to the cup up a growing skyscraper while destroying your opponent's.
+
+"""
+# TODO make it easier to climb slope and get on top of same brick - currently tends to fall off
+# TODO too easy to slip down when bricks move up - adjust mechanics
+# TODO ensure bricks remain aligned - 1px gap can allow player to slip off. Currently they seem to rise a little too far then
+# sink back.
+# TODO hitting bricks causes more damage to the surrounding bricks
+# TODO animation of bricks getting hot then disintegrating
+
 import pygame
 from pygame.locals import *
-from os import sys
 import random
 import math
+import sys
 pygame.init()
 vec = pygame.math.Vector2  # 2 for two dimensional
-import sys
+
 
 # The major, minor version numbers your require
 MIN_VER = (3, 13)
@@ -26,7 +38,14 @@ RIGHT_TOWER_EDGE = WIDTH - (TOWER_WIDTH + 1) * BRICK_WIDTH   # left edge of the 
 BRICK_SPEED = .5
 BRICK_FREQ = 1000
 BRICK_CHANCE = .2   # probability of brick appearing in each column in each round
-BRICK_COLOUR = (100, 100, 100)
+
+COLOURS = {
+    "brick": (100, 100, 100),
+    "platform": (204, 102, 0),
+    "tower_marker": (0, 80, 0),
+    "player": (30, 30, 30),
+    "bullet": (0, 0, 0)
+}
 
 ACC = .5
 FRIC = -0.12
@@ -68,12 +87,9 @@ KEYS = {
 }
 END_GAME_FONT = pygame.freetype.SysFont('sans', 40)
 
-#TODO
-# winning platform - adjust height
-# make it easier to climb slope and get on top of same brick - currently tends to fall off
-# too easy to slip down when bricks move up - adjust mechanics
-# TODO: give a warning before bricks grow - allowing player to move to best position
-# TODO: ensure bricks remain aligned - 1px gap can allow player to slip off!
+
+
+
 
 FramePerSec = pygame.time.Clock()
 displaysurface = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -97,17 +113,38 @@ def position_to_x(tower, position):
     else:
         return RIGHT_TOWER_EDGE + position * BRICK_WIDTH
 
+class TowerMarker(pygame.sprite.Sprite):
+    """ Stationery sprite that marks when a tower is about to grow and hides when it isn't """
+    def __init__(self, tower, position):
+        super().__init__()
+        self.surf = pygame.Surface((BRICK_WIDTH, BRICK_HEIGHT))
+        self.surf.set_colorkey((255, 255, 255))
+        self.left = position_to_x(tower, position)
+        self.top = sprites["ground"].rect.top
+        self.rect = self.surf.get_rect(topleft=(self.left, self.top))
+        self.draw()
+    
+    def draw(self):
+        self.surf.fill((255, 255, 255))
+        #pygame.draw.circle(self.surf, (0,0,0), (self.rect.width / 2, self.rect.height / 2), 10, width=0)
+        pygame.draw.polygon(self.surf, COLOURS["tower_marker"], [
+            (self.rect.width / 2, 0),
+            (self.rect.width, self.rect.height / 2),
+            (0, self.rect.height / 2)
+        ], width=0)
+         
+
 class Brick(pygame.sprite.Sprite):
     """ Bricks appear in the floor and move up one space, pushing up everything above them """
     def __init__(self, tower, position, stairs):
         super().__init__()
         self.surf = pygame.Surface((BRICK_WIDTH, BRICK_HEIGHT))
-        self.surf.fill(BRICK_COLOUR)
+        self.surf.fill(COLOURS["brick"])
         self.tower = tower
         self.position = position
         self.column = sprites["bricks_by_position"][tower][position]
         x = position_to_x(tower, position)
-        self.rect = self.surf.get_rect(topleft=(x, HEIGHT - BRICK_HEIGHT))
+        self.rect = self.surf.get_rect(topleft=(x, sprites["ground"].rect.top))
         self.stairs = stairs
         self.pos = vec(self.rect.midbottom)
         self.goalY = self.pos.y
@@ -115,6 +152,24 @@ class Brick(pygame.sprite.Sprite):
         self.acc = vec(0, GRAVITY)
         self.go_higher()
         self.draw()
+
+    @classmethod
+    def choose_columns(cls):
+        """ Choose the columns that will grow """      
+        cls.chosen_columns = {tower: [i for i in range(TOWER_WIDTH) if random.random() < BRICK_CHANCE] for tower in [LEFT, RIGHT]}
+
+    @classmethod    
+    def add(cls):
+        for tower, positions in cls.chosen_columns.items():
+            for position in positions:
+                for brick in sprites["bricks_by_position"][tower][position]:
+                    brick.go_higher()
+                if random.random() < .2:
+                    brick = cls(tower, position, True)
+                else:
+                    brick = cls(tower, position, False)
+                sprites["bricks"].add(brick)
+                sprites["bricks_by_position"][tower][position].append(brick)
 
     def go_higher(self):
         self.goalY -= BRICK_HEIGHT
@@ -130,11 +185,12 @@ class Brick(pygame.sprite.Sprite):
 
     def move(self):
         below = self.below()
-        if below.rect.top + 1 > self.pos.y:  # nothing directly under us, so fall
+        if below.rect.top - 1 > self.pos.y:  # nothing directly under us, so fall
             step = min(below.rect.top + 1 - self.pos.y, self.vel.y + .5 * self.acc.y)
             self.pos.y += step
             self.goalY += step
             self.vel.y += self.acc.y
+            print("fall", self ,step)
         else:                           # brick / ground directly below us. May need to move up for another brick underneath.
             self.vel = vec(0, 0)
             if self.moving_up:
@@ -154,7 +210,7 @@ class Brick(pygame.sprite.Sprite):
         #self.draw()  # No need to redraw on each cycle - bricks stay the same
 
     def draw(self):
-        self.surf.fill(BRICK_COLOUR)
+        self.surf.fill(COLOURS["brick"])
         pygame.draw.line(self.surf, (0, 0, 100), (0, 0), (BRICK_WIDTH, 0), width=1)
         
         if self.stairs:
@@ -162,6 +218,14 @@ class Brick(pygame.sprite.Sprite):
                 pygame.draw.line(self.surf, (0, 0, 100), (0, 0), (BRICK_WIDTH, BRICK_HEIGHT))
             else:
                 pygame.draw.line(self.surf, (0, 0, 100), (0, BRICK_HEIGHT), (BRICK_WIDTH, 0))
+    
+    def kill(self):
+        # TODO: add animation stage
+        self.column.remove(self)
+        super().kill()
+
+    def explode(self): #TODO: kill self and surrounding bricks
+        pass
 
     def __repr__(self):
         return f"Brick {self.tower}{self.position} top={self.rect.top} bottom={self.rect.bottom} left={self.rect.left} right={self.rect.right} stairs={self.stairs}"
@@ -213,8 +277,7 @@ class Player(pygame.sprite.Sprite):
                 self.gun_angle = GUN_BOTTOM
             #print('gun', self.gun_end())
         
-        if "cheat" in command:
-            add_bricks()
+        
         # Check horizontal movement
         if LEFT in command:
             self.acc.x = -ACC
@@ -344,7 +407,7 @@ class Player(pygame.sprite.Sprite):
     
     def update(self):
         self.surf.fill((255, 255, 255))
-        pygame.draw.circle(self.surf, (30, 30, 30), self.centre, PLAYER_SIZE * .3, width=0)
+        pygame.draw.circle(self.surf, COLOURS["player"], self.centre, PLAYER_SIZE * .3, width=0)
         red = 255 * self.shoot_power()
         pygame.draw.line(self.surf, (red, 30, 100), self.centre, self.gun_end(), width=3)
 
@@ -386,28 +449,27 @@ class Bullet(pygame.sprite.Sprite):
         self.update()
 
     def hit_brick(self, brick):
-        remove_brick(brick)
+        brick.kill()
         self.kill()  
         
     def hit_brick_later(self, brick):
         if self.hit is None:  # go straight through the first brick you hit
             self.hit = brick
-            remove_brick(brick)
+            brick.kill()
         else:   # then make the next one explode taking the surrounding bricks with it
-            explode_brick(brick)
+            brick.explode()
         self.kill() 
 
     def update(self):
         self.surf.fill((255, 255, 255))
-        pygame.draw.circle(self.surf, (0, 0, 0), (BULLET_SIZE / 2, BULLET_SIZE / 2), BULLET_SIZE, width=0)
-
+        pygame.draw.circle(self.surf, COLOURS["bullet"], (BULLET_SIZE / 2, BULLET_SIZE / 2), BULLET_SIZE, width=0)
 
 
 class Platform(pygame.sprite.Sprite):
     def __init__(self, pos, width):
         super().__init__()
         self.surf = pygame.Surface((width, BRICK_HEIGHT))
-        self.surf.fill((204, 102, 0))
+        self.surf.fill(COLOURS["platform"])
         self.rect = self.surf.get_rect(topleft=pos)
 
 class Cup(pygame.sprite.Sprite):
@@ -420,42 +482,13 @@ class Cup(pygame.sprite.Sprite):
 
 
 
-def add_bricks():
-    #print('adding bricks')
-    for tower in [LEFT, RIGHT]:
-        to_add = [i for i in range(TOWER_WIDTH) if random.random() < BRICK_CHANCE]
-        if to_add:
-            #staircase = random.choice(to_add)
-            #print(to_add)
-            for position in to_add:
-                for brick in sprites["bricks_by_position"][tower][position]:
-                    brick.go_higher()
-                if random.random() < .2:
-                    brick = Brick(tower, position, True)
-                else:
-                    brick = Brick(tower, position, False)
-                sprites["bricks"].add(brick)
-                sprites["bricks_by_position"][tower][position].append(brick)
-                #print("at", tower, position)
-
-def remove_brick(brick):
-    print("remove", brick)
-    c = brick.column
-    brick.column.remove(brick)
-    brick.kill()  
-    
-
-# TODO: hitting bricks causes more damage to the surrounding bricks
-# TODO: animation of bricks getting hot then disintegrating
-
-def explode_brick(brick):
-    remove_brick(brick) # TODO:also remove the surrounding bricks
-
-
 def initial_set_up():
-    sprites["bricks_by_position"] = {LEFT: [[] for _ in range(TOWER_WIDTH)],
-                      RIGHT: [[] for _ in range(TOWER_WIDTH)]} 
+    sprites["bricks_by_position"] = {
+        LEFT: [[] for _ in range(TOWER_WIDTH)],
+        RIGHT: [[] for _ in range(TOWER_WIDTH)]
+        }
     sprites["ground"] = Platform(pos=(0, HEIGHT - BRICK_HEIGHT), width=WIDTH)
+    sprites["tower_marker"] = {tower: [TowerMarker(tower, position) for position in range(TOWER_WIDTH)] for tower in [LEFT, RIGHT]}
     sprites["win_platform"] = Platform(pos=(BRICK_WIDTH + TOWER_WIDTH * BRICK_WIDTH,
                              HEIGHT - (BRICK_HEIGHT - 1) * (1 + WIN_PLATFORM_HEIGHT) + 2),
                         width=WIDTH-2*BRICK_HEIGHT-2*TOWER_WIDTH*BRICK_HEIGHT) 
@@ -465,26 +498,26 @@ def initial_set_up():
     sprites["background"] = pygame.sprite.Group(sprites["ground"], sprites["win_platform"], sprites["cup"])
     sprites["bricks"] = pygame.sprite.Group()
     sprites["bullets"] = pygame.sprite.Group()
-    
-#TODO: display end game message till user presses key then restart game
+ 
 while True:
     initial_set_up()
+    Brick.choose_columns()
     pygame.time.set_timer(USEREVENT, BRICK_FREQ)
     end_message = None
-    loop = True
-    while loop:
+    while True:
         for event in pygame.event.get():
             if event.type == QUIT:
                 pygame.quit()
                 sys.exit()
             if event.type == USEREVENT:
-                add_bricks()
+                Brick.add()
+                Brick.choose_columns()
 
         displaysurface.fill((0,102,204))
         pressed_keys = pygame.key.get_pressed()
         if end_message:
             if pressed_keys[K_RETURN]:
-                loop = False
+                break
         else:
             for i, player in sprites["players_dict"].items():
                 keyboard_input = {command for key, command in KEYS[i].items() if pressed_keys[key]}
@@ -503,14 +536,15 @@ while True:
                 end_message = "DRAW!" 
 
         # Draw everything
-        for entity in sprites["bricks"]:
-            displaysurface.blit(entity.surf, entity.rect)
-        for entity in sprites["background"]:
-            displaysurface.blit(entity.surf, entity.rect)
-        for entity in sprites["players_group"]:
-            displaysurface.blit(entity.surf, entity.rect)
-        for entity in sprites["bullets"]:
-            displaysurface.blit(entity.surf, entity.rect)
+        for group in ["bricks", "background", "players_group", "bullets"]:
+            for entity in sprites[group]:
+                displaysurface.blit(entity.surf, entity.rect)
+
+        for tower, columns in Brick.chosen_columns.items():
+            for column in columns:
+                marker = sprites["tower_marker"][tower][column]
+                displaysurface.blit(marker.surf, marker.rect)
+
         if end_message is not None:
             text_surf, text_rect = END_GAME_FONT.render(end_message)
             text_rect.center = (WIDTH / 2, HEIGHT / 2)
