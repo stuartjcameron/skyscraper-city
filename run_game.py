@@ -6,6 +6,7 @@ Race to the cup up a growing skyscraper while destroying your opponent's.
 # TODO too easy to slip down when bricks move up - adjust mechanics
 # TODO hitting bricks causes more damage to the surrounding bricks
 # TODO animation of bricks getting hot then disintegrating
+# TODO cpu player
 
 import pygame
 from pygame.locals import *
@@ -35,6 +36,7 @@ RIGHT_TOWER_EDGE = WIDTH - (TOWER_WIDTH + 1) * BRICK_WIDTH   # left edge of the 
 BRICK_SPEED = .5
 BRICK_FREQ = 1000
 BRICK_CHANCE = .2   # probability of brick appearing in each column in each round
+STAIR_CHANCE = .2   # probability of a new brick having stairs
 
 COLOURS = {
     "brick": (100, 100, 100),
@@ -84,37 +86,54 @@ KEYS = {
         K_RIGHT: RIGHT
     },
 }
+
 END_GAME_FONT = pygame.freetype.SysFont('sans', 40)
 ADD_BRICKS = pygame.event.custom_type()
+CHECK_SPOTLIGHTS = pygame.event.custom_type()
 
-
-
+players = {1: "human", 2: "computer"}
 
 clock = pygame.time.Clock()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Skyscraper city")
 sprites = {}    # global for all the sprites and groups
 
-def clamp(n, minn, maxn):
+def direction_vector(direction, angle):
+    """ Unit vector for a given angle (0 = bottom, pi = top) and direction (left/right)"""
+    if direction == LEFT:
+        return vec(-math.sin(angle), math.cos(angle))
+    else:
+        return vec(math.sin(angle), math.cos(angle))
+
+# Calculate the minimum x velocity of the bullet
+BULLET_VEL_X_MIN = BULLET_SPEED_MIN * direction_vector(RIGHT, min(1 - GUN_TOP, GUN_BOTTOM) * math.pi).x
+
+
+def clamp(n: float, minn, maxn):
     return max(min(maxn, n), minn)
 
-def x_to_position(x):
-    """ Convert an x coordinate to a position in the tower """
-    if x < WIDTH / 2:
-        r = (x - BRICK_WIDTH) / BRICK_WIDTH
-    else:
-        r = (x - RIGHT_TOWER_EDGE) / BRICK_WIDTH
+def x_to_position(x: float):
+    """ Convert an x coordinate to a position in the tower, or None if the position is not in the tower """
+    r = x_to_position_complete(x)
     if 0 <= r < TOWER_WIDTH:
         return int(r)
 
-def position_to_x(tower, position):
-    """ Convert a tower and position to an x coordinate """
+
+def x_to_position_complete(x: float):
+    """ Convert an x coordinate to a position in the tower """
+    if x < WIDTH / 2:
+        return (x - BRICK_WIDTH) / BRICK_WIDTH
+    else:
+        return (x - RIGHT_TOWER_EDGE) / BRICK_WIDTH
+    
+def position_to_x(tower: int, position: float):
+    """ Convert a tower and position to an x coordinate (of the left hand edge of the column) """
     if tower == LEFT:
         return (position + 1) * BRICK_WIDTH
     else:
         return RIGHT_TOWER_EDGE + position * BRICK_WIDTH
 
-         
+
 
 class Brick(pygame.sprite.Sprite):
     """ Bricks appear in the floor and move up one space, pushing up everything above them """
@@ -140,17 +159,14 @@ class Brick(pygame.sprite.Sprite):
     @classmethod
     def choose_columns(cls):
         """ Choose the columns that will grow """      
-        cls.chosen_columns = {tower: [i for i in range(TOWER_WIDTH) if random.random() < BRICK_CHANCE] for tower in [LEFT, RIGHT]}
+        cls.chosen_columns = {tower: {i for i in range(TOWER_WIDTH) if random.random() < BRICK_CHANCE} for tower in [LEFT, RIGHT]}
 
     @classmethod    
     def add(cls):
         """ Add bricks in the positions chosen earlier """
         for tower, positions in cls.chosen_columns.items():
             for position in positions:
-                if random.random() < .2:
-                    brick = cls(tower, position, True)
-                else:
-                    brick = cls(tower, position, False)
+                brick = cls(tower, position, stairs=random.random() < STAIR_CHANCE)
                 sprites["bricks"].add(brick)
                 sprites["bricks_by_position"][tower][position].append(brick)
 
@@ -204,6 +220,8 @@ class Player(pygame.sprite.Sprite):
         self.vel = vec(0,0)
         self.previous_under = sprites["ground"]
         self.previous_behind = None
+        self.stairs_behind = False
+        self.on_stairs_behind = False
         self.shoot_start_time = None
         self.update()
         
@@ -247,6 +265,7 @@ class Player(pygame.sprite.Sprite):
                 stairs_y = behind.rect.bottom - max(0, self.pos.x - behind.rect.left)
             else:
                 stairs_y = behind.rect.bottom - max(0, behind.rect.right - self.pos.x)
+        self.stairs_behind = stairs_behind ## make this accessible for benefit of CPU
             
         on_stairs_behind = False
         on_stairs_under = False
@@ -284,6 +303,8 @@ class Player(pygame.sprite.Sprite):
         self.acc.x += self.vel.x * FRIC
         self.vel += self.acc
         self.pos += self.vel + 0.5 * self.acc
+        
+        self.on_stairs_behind = on_stairs_behind ## make this accessible for benefit of CPU
         if on_stairs_behind:
             if self.tower == LEFT:
                 self.pos.y = behind.rect.bottom - max(0, self.pos.x - behind.rect.left)
@@ -311,7 +332,7 @@ class Player(pygame.sprite.Sprite):
         self.shoot_start_time = pygame.time.get_ticks()
 
     def finish_shoot(self):
-        print('shoot', self.gun_end(), self.direction_vector(), pygame.time.get_ticks() - self.shoot_start_time)
+        #print('shoot', self.gun_end(), self.direction_vector(), pygame.time.get_ticks() - self.shoot_start_time)
         sprites["bullets"].add(Bullet(tower=self.tower,
                            pos=self.rect.topleft + self.gun_end(),
                            direction=self.direction_vector(),
@@ -346,11 +367,8 @@ class Player(pygame.sprite.Sprite):
         return sprites["ground"]
 
     def direction_vector(self):
-        if self.direction == LEFT:
-            return vec(-math.sin(self.gun_angle * math.pi), math.cos(self.gun_angle * math.pi))
-        else:
-            return vec(math.sin(self.gun_angle * math.pi), math.cos(self.gun_angle * math.pi))
-        
+        return direction_vector(self.direction, self.gun_angle * math.pi)
+    
     def gun_end(self):
         return self.centre + self.direction_vector() * PLAYER_SIZE * .4
     
@@ -376,7 +394,6 @@ class Bullet(pygame.sprite.Sprite):
 
     def move(self):
         if self.pos.y >= sprites["ground"].rect.top and self.hit_floor_time is not None and pygame.time.get_ticks() - self.hit_floor_time > 1000:
-            print("bullet removed from ground", self)
             self.kill()
             return
         
@@ -436,6 +453,181 @@ class TowerMarker(pygame.sprite.Sprite):
             (0, self.rect.height / 2)
         ], width=0)
 
+class Spotlight(pygame.sprite.Sprite):
+    def __init__(self, center):
+        super().__init__()
+        self.image = pygame.Surface((10, 10))
+        self.rect = self.image.get_rect(center=center)
+        self.image.set_colorkey((255, 255, 255))
+        self.image.fill((255, 255, 255))
+        pygame.draw.circle(self.image, (255,0,0), self.rect.center, radius=5, width=0)
+        self.created = pygame.time.get_ticks()
+        pygame.time.set_timer(CHECK_SPOTLIGHTS, 5000, loops=1)
+        
+    def check(self):
+        if pygame.time.get_ticks - self.created >= 5000:
+            self.kill()
+
+
+class CPU():
+    def __init__(self, sprite):
+        self.sprite = sprite
+        self.tower = sprite.tower
+        self.ground_y = sprites["ground"].rect.top
+        if self.tower == LEFT:
+            self.columns = sprites["bricks_by_position"][LEFT]
+            self.target_columns = sprites["bricks_by_position"][RIGHT]
+        else:
+            self.columns = sprites["bricks_by_position"][RIGHT]
+            self.target_columns = sprites["bricks_by_position"][LEFT][::-1]  # reverse order because want to shoot inner ones first
+        self.previous_can_get_to = []
+        self.shoot_at = None
+
+    def get_position(self):
+        return x_to_position(self.sprite.rect.centerx)
+       
+    def get_available_columns(self):
+        """ Return a list of the indices of columns that can be accessed without falling down """
+        position = self.get_position()
+        if position is None: # Not on the tower
+            return set(range(TOWER_WIDTH))  # can reach all positions, by walking along the ground
+        height = (self.ground_y - self.sprite.rect.bottom) // BRICK_HEIGHT
+        if height == 0:
+            return set(range(TOWER_WIDTH))  # can reach all, by walking along the ground
+        return ({i for i in range(position) if all(len(column) >= height for column in self.columns[i:position])} |
+            {i for i in range(position+1, TOWER_WIDTH) if all(len(column) >= height for column in self.columns[position+1:i+1])})
+                
+    def move_towards(self, x, goal):
+        """ Return the movement towards the given x coordinate """
+        if x == goal:
+            return set()
+        if x < goal:
+            return {RIGHT}
+        return {LEFT}
+    
+    def set_gun_for_target(self, target):
+        start = self.sprite.gun_end()  # this will not be exactly correct because the gun end moves when we change angle, but close enough...
+        s = target - start
+        b = s.y / s.x
+        c = .5 * GRAVITY * s.x
+        
+        steps = 100
+        for speed_step in range(steps):
+            vel_x = BULLET_VEL_X_MIN + (BULLET_SPEED_MAX - BULLET_VEL_X_MIN) * speed_step / steps
+            if self.tower == RIGHT:
+                vel_x = -vel_x  # shoot leftwards
+            vel_y = b * vel_x - c / vel_x
+            u = math.sqrt(vel_x * vel_x + vel_y * vel_y)
+            a = math.acos(vel_y / u) / math.pi
+            
+            if BULLET_SPEED_MIN <= u <= BULLET_SPEED_MAX and GUN_BOTTOM <= a <= GUN_TOP:
+                print("Trying", vel_x, vel_y, u, a)
+                return (u - BULLET_SPEED_MIN) / (BULLET_SPEED_MAX - BULLET_SPEED_MIN), a
+
+    def choose_target(self):
+        """ Choose a target, shootable from the player's current coordinates, preferably with minimal power
+         To make this manageable, we aim at the vertical centre of the innermost column.
+        """
+        
+        for column in self.target_columns:
+            if column:
+                top_brick = column[-1].rect
+                print("found target", top_brick)
+                if self.tower == RIGHT:
+                    return vec(top_brick.right, self.ground_y - (self.ground_y - top_brick.top) / 2)
+                else:
+                    return vec(top_brick.left, self.ground_y - (self.ground_y - top_brick.top) / 2)
+        print("found no target")
+    
+    def get_shoot_move(self):
+        # TODO: ensure facing the right way when shooting
+
+        power, a = self.shoot_at
+        # First check if facing the wrong way
+        if self.tower == RIGHT and self.sprite.direction == RIGHT:
+            return {LEFT}
+        elif self.tower == LEFT and self.sprite.direction == LEFT:
+            return {RIGHT}
+        if abs(a - self.sprite.gun_angle) < GUN_SPEED:  # close to the right angle
+            if self.sprite.shoot_power() >= power:      # achieved sufficient power
+                print("achieved sufficient power, releasing fire")
+                self.shoot_at = None
+                return set()   # release fire button
+            else:
+                print("fire bit more", self.sprite.shoot_power())
+                return {FIRE}  # hold fire button longer
+        elif a > self.sprite.gun_angle:
+            return {UP}
+        else:
+            return {DOWN}
+        
+    def move(self):
+        x = self.sprite.rect.centerx
+        position = x_to_position(x)
+        position_complete = x_to_position_complete(x)
+        height = (self.ground_y - self.sprite.rect.bottom) // BRICK_HEIGHT
+        if self.tower == RIGHT:        
+        
+            # Move to win platform if possible from current row
+            if position is not None and height >= WIN_PLATFORM_HEIGHT and all(len(column) >= WIN_PLATFORM_HEIGHT for column in self.columns[:position]):
+                return {LEFT}
+                    
+            # If trying to shoot, move gun towards target
+            if self.shoot_at is not None:
+                return self.get_shoot_move()
+            
+            # Position gun upwards if not already 
+            if self.sprite.gun_angle <= .6:
+                return {UP}
+            
+            # Climb stairs if on them
+            # TODO: computer gets stuck in a cycle of climbing stairs, falling off the top, and getting back on again.
+            # ? maybe monitor shunt and turn right in response
+            if self.sprite.on_stairs_behind:
+                return {LEFT}
+            
+            # Get to start of stairs if there are some behind
+            if self.sprite.stairs_behind:
+                goal = position_to_x(self.tower, position) + BRICK_WIDTH - FLOOR_COLLISION_THRESHOLD
+                return self.move_towards(x, goal)
+        
+            # Move towards a column moving up on the same row
+            moving = Brick.chosen_columns[self.tower]
+            if position in moving:
+                return set()  # Wait # TODO: While waiting, can shoot
+            available = self.get_available_columns()
+            if type(available) is not set:
+                raise TypeError("available is not a set")
+            if available != self.previous_can_get_to:
+                print('can get to', {i: len(self.columns[i]) for i in available}, 'height', height, )
+            self.previous_can_get_to = available
+            available_moving = available & moving
+            if available_moving:
+                choice = min(available_moving, key=lambda i: abs(position_complete - i))
+                goal = position_to_x(self.tower, choice) + BRICK_WIDTH / 2
+                if choice == position_complete: # shouldn't happen
+                    print("!!! strangely found own position", choice) 
+                    return set() # Wait
+                else:
+                    return self.move_towards(x, goal)
+
+            # Check for stairs accessible from current position
+            available_with_stairs = {i for i in available if len(self.columns[i]) > height and getattr(self.columns[i][-height-1], "stairs", None)}
+            if available_with_stairs:
+                choice = min(available_with_stairs, key=lambda i: abs(position_complete - i))
+                goal = position_to_x(self.tower, choice) + BRICK_WIDTH - FLOOR_COLLISION_THRESHOLD  # move towards right edge to climb the stairs
+                return self.move_towards(x, goal)
+            
+            # Stop and shoot
+            target = self.choose_target()
+            if target is not None:
+                self.shoot_at = self.set_gun_for_target(target)
+                if self.shoot_at is not None:
+                    return self.get_shoot_move()
+
+            # Can't do anything else, then try to move towards the centre
+
+        return set()
 
 
 def initial_set_up():
@@ -454,11 +646,15 @@ def initial_set_up():
     sprites["background"] = pygame.sprite.Group(sprites["ground"], sprites["win_platform"], sprites["cup"])
     sprites["bricks"] = pygame.sprite.Group()
     sprites["bullets"] = pygame.sprite.Group()
+    sprites["spotlights"] = pygame.sprite.Group()
  
+
 while True:
     initial_set_up()
+    cpu = {key: CPU(player) for key, player in sprites["players_dict"].items() if players[key] == "computer"}
     Brick.choose_columns()
-    #pygame.time.set_timer(ADD_BRICKS, BRICK_FREQ)
+    
+    pygame.time.set_timer(ADD_BRICKS, BRICK_FREQ)
     end_message = None
     while True:
         for event in pygame.event.get():
@@ -468,6 +664,10 @@ while True:
             if event.type == ADD_BRICKS:
                 Brick.add()
                 Brick.choose_columns()
+            if event.type == CHECK_SPOTLIGHTS:
+                for sprite in sprites["spotlights"]:
+                    sprite.check()
+
 
         pressed_keys = pygame.key.get_pressed()
         if end_message:
@@ -477,9 +677,17 @@ while True:
             if pressed_keys[K_1]:
                 Brick.add()
                 Brick.choose_columns()
+            if pressed_keys[K_2]:
+                print(x_to_position(cpu[2].sprite.rect.centerx), cpu[2].can_get_to())
             for i, player in sprites["players_dict"].items():
-                keyboard_input = {command for key, command in KEYS[i].items() if pressed_keys[key]}
-                player.move(keyboard_input)
+                if i in cpu:
+                    move = cpu[i].move()
+                    if move:
+                        print("computer move", move)
+                else:
+                    move = {command for key, command in KEYS[i].items() if pressed_keys[key]}
+                player.move(move)
+
             for group in ["bricks", "bullets"]:
                 for sprite in sprites[group]:
                     sprite.move()
@@ -507,7 +715,7 @@ while True:
             text_surf, text_rect = END_GAME_FONT.render(end_message)
             text_rect.center = (WIDTH / 2, HEIGHT / 2)
             screen.blit(text_surf, text_rect)
-            pygame.time.set_timer(USEREVENT, 0)   # remove timer
+            pygame.time.set_timer(ADD_BRICKS, 0)   # remove timer
         pygame.display.update()
         clock.tick(FPS)
     #pygame.time.set_timer(USEREVENT, 0)   # remove timer
